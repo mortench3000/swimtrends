@@ -1,12 +1,21 @@
 #!/bin/bash
+
+source .env
+
+if [[ -z "$POSTGRES_PASSWORD" ]]; then
+    echo "Must provide POSTGRES_PASSWORD in environment" 1>&2
+    exit 1
+fi
+
 docker-compose up -d
 sleep 8
 
-# Find container name
+# Find pgadmin4 container name
 pgadm4=$(docker ps -a | grep pgadmin4 | awk '{print $NF}')
 
 docker exec -u pgadmin:pgadmin -it ${pgadm4} mkdir -m 700 /var/lib/pgadmin/storage/pgadmin4_pgadmin.org
-docker cp pgpassfile ${pgadm4}:/tmp/pgpassfile
+cp pgpassfile pgpassfile_tmp && truncate pgpassfile_tmp -s-6 && echo -n ${POSTGRES_PASSWORD} >> pgpassfile_tmp
+docker cp pgpassfile_tmp ${pgadm4}:/tmp/pgpassfile && rm pgpassfile_tmp
 docker exec -it -u root ${pgadm4} chown pgadmin:pgadmin /tmp/pgpassfile
 docker exec -it ${pgadm4} mv /tmp/pgpassfile /var/lib/pgadmin/storage/pgadmin4_pgadmin.org
 docker exec -it ${pgadm4} chmod 600 /var/lib/pgadmin/storage/pgadmin4_pgadmin.org/pgpassfile
