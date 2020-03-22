@@ -20,6 +20,9 @@ POSTGRES_USER = 'postgres'
 POSTGRES_PASSWORD = '***'
 POSTGRES_DB = 'swimtrends'
 
+# Season for fixed basetime points calculation
+FIXED_BASETIME_SEASON = 2020
+
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 #USER_AGENT = 'swimtrends (+http://www.yourdomain.com)'
 

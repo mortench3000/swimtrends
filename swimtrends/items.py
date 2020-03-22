@@ -36,4 +36,5 @@ class Result(scrapy.Item):
     rank = scrapy.Field(serializer=int)
     points = scrapy.Field(serializer=int)
     points_calc = scrapy.Field(serializer=int)
+    points_fixed = scrapy.Field(serializer=int)
     completed_time = scrapy.Field()

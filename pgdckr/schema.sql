@@ -39,6 +39,7 @@ CREATE TABLE result (
     re_rank SMALLINT NOT NULL,
     re_points SMALLINT NOT NULL DEFAULT 0,
     re_points_calc SMALLINT NOT NULL DEFAULT 0,
+    re_points_fixed SMALLINT NOT NULL DEFAULT 0,
     re_completed_time VARCHAR(8),
     race_id INTEGER REFERENCES race(race_id)
 );
