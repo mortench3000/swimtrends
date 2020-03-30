@@ -1,10 +1,11 @@
-DROP TABLE IF EXISTS result, race, meet CASCADE;
+DROP TABLE IF EXISTS race_result, race, meet CASCADE;
 
 CREATE TYPE course_type AS ENUM ('SCM', 'LCM');
 CREATE TYPE gender_type AS ENUM ('M', 'F', 'X');
 CREATE TYPE stroke_type AS ENUM ('FLY', 'BREAST', 'BACK', 'FREE', 'MEDLEY');
 CREATE TYPE race_status_type AS ENUM ('PRELIM', 'A-FINAL', 'B-FINAL', 'C-FINAL', 'AGE-FINAL-1', 'AGE-FINAL-2', 'AGE-FINAL-3');
 CREATE TYPE age_group_type AS ENUM ('Y', 'S');
+CREATE TYPE pit_age_group_type AS ENUM ('Y1', 'Y2', 'Y3', 'J1', 'J2', 'J3', 'S', '-');
 
 CREATE TABLE meet (
     meet_id SMALLINT PRIMARY KEY,
@@ -30,11 +31,12 @@ CREATE TABLE race (
     meet_id INTEGER REFERENCES meet(meet_id)
 );
 
-CREATE TABLE result (
+CREATE TABLE race_result (
     result_id SERIAL PRIMARY KEY,
     re_swimmer TEXT NOT NULL,
     re_swimmer_details TEXT,
     re_birth SMALLINT NOT NULL,
+    re_pit_age_group pit_age_group_type DEFAULT '-',
     re_team TEXT NOT NULL,
     re_rank SMALLINT NOT NULL,
     re_points SMALLINT NOT NULL DEFAULT 0,

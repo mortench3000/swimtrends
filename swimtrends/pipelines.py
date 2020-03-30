@@ -172,7 +172,7 @@ class MeetResultsPGPipeline(object):
     def process_item(self, item, spider):
         me_SQL = "INSERT INTO meet(meet_id,m_name,category,venue,course,m_date,season) values(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (meet_id) DO NOTHING;"
         ra_SQL = "INSERT INTO race(ra_nbr,ra_status,ra_gender,ra_distance,ra_stroke,ra_relay_count,ra_link,meet_id) values(%s,%s,%s,%s,%s,%s,%s,%s) RETURNING race_id;"
-        re_SQL = "INSERT INTO result(re_swimmer,re_swimmer_details,re_birth,re_team,re_rank,re_points,re_points_calc,re_points_fixed,re_completed_time,race_id) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        re_SQL = "INSERT INTO race_result(re_swimmer,re_swimmer_details,re_birth,re_team,re_rank,re_points,re_points_calc,re_points_fixed,re_completed_time,race_id) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
 
         me_data = (item['meetId'], item['name'], item['category'], item['venue'], item['course'], item['date'], item['season'])
         self.cur.execute(me_SQL, me_data)
