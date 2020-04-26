@@ -25,7 +25,7 @@ ag3_SQL =  \
    select re.result_id \
    from meet m, race ra, race_result re \
    where m.meet_id = %s \
-    and m.category = 'DMY' \
+    and 'DMY' = ANY (category) \
     and m.meet_id = ra.meet_id \
     and ra.race_id = re.race_id \
     and ra.ra_gender = %s \
@@ -33,7 +33,7 @@ ag3_SQL =  \
         select min(re.re_birth) \
         from meet m, race ra, race_result re \
         where m.meet_id = %s \
-            and m.category = 'DMY' \
+            and 'DMY' = ANY (category) \
             and m.meet_id = ra.meet_id \
             and ra.race_id = re.race_id \
             and ra.ra_gender = %s \
@@ -46,7 +46,7 @@ ag2_SQL = \
    select re.result_id \
    from meet m, race ra, race_result re \
    where m.meet_id = %s \
-    and m.category = 'DMY' \
+    and 'DMY' = ANY (category) \
     and m.meet_id = ra.meet_id \
     and ra.race_id = re.race_id \
     and ra.ra_gender = %s \
@@ -54,7 +54,7 @@ ag2_SQL = \
         select min(re.re_birth)+1 \
         from meet m, race ra, race_result re \
         where m.meet_id = %s \
-            and m.category = 'DMY' \
+            and 'DMY' = ANY (category) \
             and m.meet_id = ra.meet_id \
             and ra.race_id = re.race_id \
             and ra.ra_gender = %s \
@@ -67,7 +67,7 @@ ag1_SQL = \
    select re.result_id \
    from meet m, race ra, race_result re \
    where m.meet_id = %s \
-    and m.category = 'DMY' \
+    and 'DMY' = ANY (category) \
     and m.meet_id = ra.meet_id \
     and ra.race_id = re.race_id \
     and ra.ra_gender = %s \
@@ -75,7 +75,7 @@ ag1_SQL = \
         select min(re.re_birth)+2 \
         from meet m, race ra, race_result re \
         where m.meet_id = %s \
-            and m.category = 'DMY' \
+            and 'DMY' = ANY (category) \
             and m.meet_id = ra.meet_id \
             and ra.race_id = re.race_id \
             and ra.ra_gender = %s \
