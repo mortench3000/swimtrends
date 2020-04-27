@@ -3,6 +3,7 @@
 
 import os
 import psycopg2
+import itertools
 import urllib.parse as urlparse
 from urllib.parse import parse_qs
 
@@ -19,68 +20,52 @@ with open('urls.txt') as urls:
         purl = urlparse.urlparse(url)
         meetIds.append(int(parse_qs(purl.query)['cid'][0]))
 
-ag3_SQL =  \
- "update race_result set re_pit_age_group = 'Y3' \
-  where result_id in ( \
-   select re.result_id \
-   from meet m, race ra, race_result re \
-   where m.meet_id = %s \
-    and 'DMY' = ANY (category) \
-    and m.meet_id = ra.meet_id \
-    and ra.race_id = re.race_id \
-    and ra.ra_gender = %s \
-    and re.re_birth = ( \
-        select min(re.re_birth) \
-        from meet m, race ra, race_result re \
-        where m.meet_id = %s \
-            and 'DMY' = ANY (category) \
-            and m.meet_id = ra.meet_id \
-            and ra.race_id = re.race_id \
-            and ra.ra_gender = %s \
-            and re.re_birth > 0) \
-    );"
+genders = ['M','F']
+y3_ages = [15,14]
+j3_ages = [18,17]
+s3_ages = [21,20]
 
-ag2_SQL = \
- "update race_result set re_pit_age_group = 'Y2' \
-  where result_id in ( \
-   select re.result_id \
-   from meet m, race ra, race_result re \
-   where m.meet_id = %s \
-    and 'DMY' = ANY (category) \
-    and m.meet_id = ra.meet_id \
-    and ra.race_id = re.race_id \
-    and ra.ra_gender = %s \
-    and re.re_birth = ( \
-        select min(re.re_birth)+1 \
-        from meet m, race ra, race_result re \
-        where m.meet_id = %s \
-            and 'DMY' = ANY (category) \
-            and m.meet_id = ra.meet_id \
-            and ra.race_id = re.race_id \
-            and ra.ra_gender = %s \
-            and re.re_birth > 0) \
-    );"
+# List meetIds where DMJ is part of another meet i.e. DM
+dmj_multi_meets = [2485,2039]
 
-ag1_SQL = \
- "update race_result set re_pit_age_group = 'Y1' \
+# ----------------------------------------------------------------------------
+
+ag_SQL =  \
+ "update race_result set re_pit_age_group = %s \
   where result_id in ( \
    select re.result_id \
    from meet m, race ra, race_result re \
    where m.meet_id = %s \
-    and 'DMY' = ANY (category) \
     and m.meet_id = ra.meet_id \
     and ra.race_id = re.race_id \
     and ra.ra_gender = %s \
     and re.re_birth = ( \
-        select min(re.re_birth)+2 \
-        from meet m, race ra, race_result re \
-        where m.meet_id = %s \
-            and 'DMY' = ANY (category) \
-            and m.meet_id = ra.meet_id \
-            and ra.race_id = re.race_id \
-            and ra.ra_gender = %s \
-            and re.re_birth > 0) \
-    );"
+        select m.season-%s \
+        from meet m \
+        where m.meet_id = %s) \
+  );"
+
+ag_s_SQL =  \
+ "update race_result set re_pit_age_group = %s \
+  where result_id in ( \
+   select re.result_id \
+   from meet m, race ra, race_result re \
+   where m.meet_id = %s \
+    and m.meet_id = ra.meet_id \
+    and ra.race_id = re.race_id \
+    and ra.ra_gender = %s \
+    and re.re_birth < ( \
+        select m.season-%s \
+        from meet m \
+        where m.meet_id = %s) \
+  );"
+
+# ----------------------------------------------------------------------------
+
+dmj_category_update_SQL = \
+ "update meet m \
+  set category = category || '{\"DMJ\"}'::meet_category_type[] \
+  where m.meet_id = %s;"
 
 con = psycopg2.connect(host=os.environ.get('POSTGRES_HOST'),
     database=os.environ.get('POSTGRES_DB'),
@@ -90,10 +75,39 @@ con = psycopg2.connect(host=os.environ.get('POSTGRES_HOST'),
 with con:
     cur = con.cursor()
     for meetId in meetIds:
-        for gender in ['M','F']:
-            ag_data = (meetId, gender, meetId, gender)
-            cur.execute(ag3_SQL, ag_data)
-            cur.execute(ag2_SQL, ag_data)
-            cur.execute(ag1_SQL, ag_data)
+
+        if meetId in dmj_multi_meets:
+            cur.execute(dmj_category_update_SQL, [meetId])
+
+        for (gender, y3_age, j3_age, s3_age) in zip(genders, y3_ages, j3_ages, s3_ages):
+
+            # Youth 1-3
+            ag_data = ('Y3', meetId, gender, y3_age, meetId)
+            cur.execute(ag_SQL, ag_data)
+            ag_data = ('Y2', meetId, gender, y3_age-1, meetId)
+            cur.execute(ag_SQL, ag_data)
+            ag_data = ('Y1', meetId, gender, y3_age-2, meetId)
+            cur.execute(ag_SQL, ag_data)
+
+            # Junior 1-3
+            ag_data = ('J3', meetId, gender, j3_age, meetId)
+            cur.execute(ag_SQL, ag_data)
+            ag_data = ('J2', meetId, gender, j3_age-1, meetId)
+            cur.execute(ag_SQL, ag_data)
+            ag_data = ('J1', meetId, gender, j3_age-2, meetId)
+            cur.execute(ag_SQL, ag_data)
+
+            # Senior 1-3
+            ag_data = ('S3', meetId, gender, s3_age, meetId)
+            cur.execute(ag_SQL, ag_data)
+            ag_data = ('S2', meetId, gender, s3_age-1, meetId)
+            cur.execute(ag_SQL, ag_data)
+            ag_data = ('S1', meetId, gender, s3_age-2, meetId)
+            cur.execute(ag_SQL, ag_data)
+
+            # Senior
+            ag_data = ('S', meetId, gender, s3_age, meetId)
+            cur.execute(ag_s_SQL, ag_data)
+
         con.commit()
     cur.close()
