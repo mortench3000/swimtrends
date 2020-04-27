@@ -26,7 +26,7 @@ j3_ages = [18,17]
 s3_ages = [21,20]
 
 # List meetIds where DMJ is part of another meet i.e. DM
-dmj_multi_meets = [2485,2039]
+dmj_multi_meets = [1870,2039,2309,2485]
 
 # ----------------------------------------------------------------------------
 
