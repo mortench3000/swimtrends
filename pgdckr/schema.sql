@@ -38,6 +38,7 @@ CREATE TABLE race_result (
     re_swimmer_details TEXT,
     re_birth SMALLINT NOT NULL,
     re_pit_age_group pit_age_group_type DEFAULT '-',
+    re_pit_age_group_rank SMALLINT DEFAULT 0,
     re_team TEXT NOT NULL,
     re_rank SMALLINT NOT NULL,
     re_points SMALLINT NOT NULL DEFAULT 0,
