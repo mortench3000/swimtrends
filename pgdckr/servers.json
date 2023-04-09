@@ -1,14 +1,27 @@
 {
     "Servers": {
         "1": {
-            "Name": "swimtrends",
+            "Name": "swimtrends-local",
             "Group": "Servers",
             "Host": "postgres",
             "Port": 5432,
             "MaintenanceDB": "postgres",
             "Username": "postgres",
             "SSLMode": "prefer",
-	    "PassFile": "/pgpassfile"
+            "PassFile": "/pgpassfile_local"
+        },
+        "2": {
+            "Name": "swimtrends-gcp",
+            "Group": "Servers",
+            "Host": "34.89.167.195",
+            "Port": 5432,
+            "MaintenanceDB": "postgres",
+            "Username": "postgres",
+            "SSLMode": "verify-ca",
+            "PassFile": "/pgpassfile_gcp",
+            "SSLCert": "/client-cert.pem",
+            "SSLKey": "/client-key.pem",
+            "SSLRootCert": "/server-ca.pem"
         }
     }
 }

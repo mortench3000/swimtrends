@@ -26,7 +26,7 @@ j3_ages = [18,17]
 s3_ages = [21,20]
 
 # List meetIds where DMJ is part of another meet i.e. DM
-dmj_multi_meets = [1870,2039,2309,2485]
+dmj_multi_meets = [610,844,1173,1585,1870,2039,2309,2485]
 
 # ----------------------------------------------------------------------------
 
@@ -68,6 +68,15 @@ dmj_category_update_SQL = \
   where m.meet_id = %s;"
 
 # ----------------------------------------------------------------------------
+# Fixing bad date for DM-K 2011 meet_id 844
+
+fix_bad_meet_date_SQL = \
+ "update meet m \
+  set m_date = '2011-11-24' \
+  where m.meet_id = 844 \
+  and m_date = '2012-01-01';"
+
+# ----------------------------------------------------------------------------
 
 ag_rank_SQL_1 =  \
  "select distinct ra.ra_nbr \
@@ -105,6 +114,10 @@ with con:
 
         if meetId in dmj_multi_meets:
             cur.execute(dmj_category_update_SQL, [meetId])
+            con.commit()
+
+        if meetId == 844:
+            cur.execute(fix_bad_meet_date_SQL)
             con.commit()
 
         for (gender, y3_age, j3_age, s3_age) in zip(genders, y3_ages, j3_ages, s3_ages):
