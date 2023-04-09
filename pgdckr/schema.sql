@@ -5,7 +5,7 @@ CREATE TYPE gender_type AS ENUM ('M', 'F', 'X');
 CREATE TYPE stroke_type AS ENUM ('FLY', 'BREAST', 'BACK', 'FREE', 'MEDLEY');
 CREATE TYPE race_status_type AS ENUM ('PRELIM', 'A-FINAL', 'B-FINAL', 'C-FINAL', 'AGE-FINAL-1', 'AGE-FINAL-2', 'AGE-FINAL-3');
 CREATE TYPE age_group_type AS ENUM ('Y', 'S');
-CREATE TYPE pit_age_group_type AS ENUM ('Y1', 'Y2', 'Y3', 'J1', 'J2', 'J3', 'S', 'S1', 'S2', 'S3', '-');
+CREATE TYPE pit_age_group_type AS ENUM ('Y1', 'Y2', 'Y3', 'J1', 'J2', 'J3', 'S1', 'S2', 'S3', 'S', '-');
 CREATE TYPE meet_category_type AS ENUM('DMY', 'DMYE', 'DMYW', 'DMJ', 'DMJE', 'DMJW', 'DMH', 'DM', 'DME', 'DMW', 'DO')
 
 CREATE TABLE meet (
