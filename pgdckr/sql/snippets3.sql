@@ -62,4 +62,3 @@ where m.meet_id = ra.meet_id
 	and ra.ra_relay_count = 1
 order by ra.ra_nbr asc;
 
-

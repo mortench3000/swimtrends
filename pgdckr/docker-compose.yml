@@ -3,7 +3,7 @@ version: '3.7'
 services:
   postgres:
     container_name: postgres_container
-    image: postgres:12.6
+    image: postgres:12.14
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Welcome01}
@@ -13,14 +13,14 @@ services:
       - "5432:5432"
     volumes:
       - swimtrends-pgdata:/data/postgres
-      - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
+#     - ./schema.sql:/docker-entrypoint-initdb.d/init.sql
     networks:
       - postgres
     restart: unless-stopped
 
   pgAdmin:
     container_name: pgadmin4_container
-    image: dpage/pgadmin4:5.1
+    image: dpage/pgadmin4:6.21
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}

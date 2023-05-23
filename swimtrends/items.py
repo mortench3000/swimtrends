@@ -20,7 +20,8 @@ class Meet(scrapy.Item):
 
 class Race(scrapy.Item):
     nbr = scrapy.Field(serializer=int)
-    text = scrapy.Field()
+    title = scrapy.Field()
+    session = scrapy.Field()
     gender = scrapy.Field()
     distance = scrapy.Field()
     stroke = scrapy.Field()

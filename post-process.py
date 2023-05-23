@@ -3,7 +3,6 @@
 
 import os
 import psycopg2
-import itertools
 import urllib.parse as urlparse
 from urllib.parse import parse_qs
 

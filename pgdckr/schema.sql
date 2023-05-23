@@ -6,7 +6,7 @@ CREATE TYPE stroke_type AS ENUM ('FLY', 'BREAST', 'BACK', 'FREE', 'MEDLEY');
 CREATE TYPE race_status_type AS ENUM ('PRELIM', 'A-FINAL', 'B-FINAL', 'C-FINAL', 'AGE-FINAL-1', 'AGE-FINAL-2', 'AGE-FINAL-3');
 CREATE TYPE age_group_type AS ENUM ('Y', 'S');
 CREATE TYPE pit_age_group_type AS ENUM ('Y1', 'Y2', 'Y3', 'J1', 'J2', 'J3', 'S1', 'S2', 'S3', 'S', '-');
-CREATE TYPE meet_category_type AS ENUM('DMY', 'DMYE', 'DMYW', 'DMJ', 'DMJE', 'DMJW', 'DMH', 'DM', 'DME', 'DMW', 'DO')
+CREATE TYPE meet_category_type AS ENUM ('DMY', 'DMYE', 'DMYW', 'DMJ', 'DMJE', 'DMJW', 'DMH', 'DM', 'DME', 'DMW', 'DO');
 
 CREATE TABLE meet (
     meet_id SMALLINT PRIMARY KEY,
@@ -28,7 +28,7 @@ CREATE TABLE race (
     ra_distance SMALLINT NOT NULL,
     ra_stroke stroke_type,
     ra_relay_count SMALLINT NOT NULL,
-    ra_link VARCHAR(75) NOT NULL,
+    ra_link VARCHAR(125) NOT NULL,
     meet_id SMALLINT REFERENCES meet(meet_id)
 );
 
@@ -45,8 +45,13 @@ CREATE TABLE race_result (
     re_points_calc SMALLINT NOT NULL DEFAULT 0,
     re_points_fixed SMALLINT NOT NULL DEFAULT 0,
     re_completed_time VARCHAR(8),
-    race_id INTEGER REFERENCES race(race_id)
+    race_id INTEGER REFERENCES race(race_id),
+    UNIQUE (race_id, re_swimmer, re_birth, re_team)
 );
+
+ALTER TABLE race_result 
+ADD CONSTRAINT unique_swimmer_result 
+UNIQUE (race_id, re_swimmer, re_birth, re_team);
 
 -- data/Points_Table_Base_Times.csv
 -- year,course,age_group,gender,relay_count,distance,stroke,basetime,basetime_in_sec

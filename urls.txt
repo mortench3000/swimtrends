@@ -1,2 +1,1 @@
-http://www.livetiming.dk/events.php?cid=5718
-http://www.livetiming.dk/events.php?cid=5717
+https://www.livetiming.dk/results.php?cid=6570

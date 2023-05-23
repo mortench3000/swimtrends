@@ -67,11 +67,19 @@ class MeetResultsPipeline(object):
             else:
                 age_group = 'S'
                 season = item['season']
-            logging.debug("Category: %s - Age group: %s - Season: %s", item['category'], age_group, season)
+            logging.debug("Category: %s - Age group: %s - Season: %s - Course: %s", item['category'], age_group, season, item['course'])
 
             # Find base time for race
             season_basetime = 0.0
-            self.cur.execute(SQL, (season, age_group, item['course'], race['gender'], race['relay_count'], race['distance'], race['stroke']))
+            try:
+                self.cur.execute(SQL, (season, age_group, item['course'], race['gender'], race['relay_count'], race['distance'], race['stroke']))
+            except  Exception as e:
+                logging.error('Error in SQL: %s', e)
+                logging.error('SQL: %s', SQL)
+                logging.error('Data: %s', (season, age_group, item['course'], race['gender'], race['relay_count'], race['distance'], race['stroke']))
+                self.connection.rollback()
+                return item
+            
             if self.cur.rowcount > 0:
                 season_basetime = self.cur.fetchone()[0]
                 logging.debug("Seasonal basetime (%s): %s", season, season_basetime)
@@ -91,7 +99,8 @@ class MeetResultsPipeline(object):
                 result['points_fixed'] = 0
                 if result['rank'] == '-':
                     result['rank'] = -1 #DSQ, DNS etc
-                    result['completed_time'] = ''
+                    if not str(result['completed_time']).replace('.','',1).replace(':','',1).isdigit():
+                        result['completed_time'] = ''
                 else:
                     result['rank'] = int(result['rank'])
                     completed_time_in_secs = getTimeInSecs(result['completed_time'])
@@ -99,7 +108,7 @@ class MeetResultsPipeline(object):
                         result['points_calc'] = calculatePoints(season_basetime, completed_time_in_secs)
                     if fixed_basetime > 0:
                         result['points_fixed'] = calculatePoints(fixed_basetime, completed_time_in_secs)
-                if len(result['points']) == 0:
+                if result['points'] == None or len(str(result['points'])) == 0:
                     result['points'] = 0
                 else:
                     result['points'] = int(result['points'])
@@ -171,16 +180,35 @@ class MeetResultsPGPipeline(object):
 
     def process_item(self, item, spider):
         me_SQL = "INSERT INTO meet(meet_id,m_name,category,venue,course,m_date,season) values(%s,%s,ARRAY[%s]::meet_category_type[],%s,%s,%s,%s) ON CONFLICT (meet_id) DO NOTHING;"
-        ra_SQL = "INSERT INTO race(ra_nbr,ra_status,ra_gender,ra_distance,ra_stroke,ra_relay_count,ra_link,meet_id) values(%s,%s,%s,%s,%s,%s,%s,%s) RETURNING race_id;"
-        re_SQL = "INSERT INTO race_result(re_swimmer,re_swimmer_details,re_birth,re_team,re_rank,re_points,re_points_calc,re_points_fixed,re_completed_time,race_id) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s);"
+        ra_SQL = "INSERT INTO race(ra_nbr,ra_title,ra_status,ra_gender,ra_distance,ra_stroke,ra_relay_count,ra_link,meet_id) SELECT %s,%s,%s,%s,%s,%s,%s,%s,%s WHERE NOT EXISTS (SELECT 1 FROM race WHERE meet_id=%s AND ra_nbr=%s AND ra_status=%s) RETURNING race_id;"
+        re_SQL = "INSERT INTO race_result(re_swimmer,re_swimmer_details,re_birth,re_team,re_rank,re_points,re_points_calc,re_points_fixed,re_completed_time,race_id) values(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT ON CONSTRAINT unique_swimmer_result DO NOTHING;"
 
-        me_data = (item['meetId'], item['name'], item['category'], item['venue'], item['course'], item['date'], item['season'])
-        self.cur.execute(me_SQL, me_data)
-        self.connection.commit()
-
+        me_data = (item['meetId'], item['name'], item['category'].split(','), item['venue'], item['course'], item['date'], item['season'])
+        
+        try:
+            self.cur.execute(me_SQL, me_data)
+        except  Exception as e:
+            logging.error('Error inserting meet %s', e)
+            logging.error('SQL: %s', me_SQL)
+            logging.error('Data: %s', me_data)
+            self.connection.rollback()
+            return item
+        
         for race in item['race']:
-            ra_data = (race['nbr'], race['text'],race['gender'],race['distance'],race['stroke'],race['relay_count'],race['page'],item['meetId'])
-            self.cur.execute(ra_SQL, ra_data)
+            ra_data = (race['nbr'],race['title'],race['session'],race['gender'],race['distance'],race['stroke'],race['relay_count'],race['page'],item['meetId'],item['meetId'],race['nbr'],race['session'])
+
+            try:
+                self.cur.execute(ra_SQL, ra_data)
+            except Exception as e:
+                logging.error('Error inserting race %s', e)
+                logging.error('SQL: %s', ra_SQL)
+                logging.error('Data: %s', ra_data)
+                self.connection.rollback()
+                return item
+
+            if self.cur.rowcount == 0:
+                logging.debug('Race not inserted - skipping %s %s %s',  item['meetId'], race['nbr'], race['session'])
+                continue
             race_id = self.cur.fetchone()[0]
             logging.debug('Race inserted with id %s', race_id)
 

@@ -17,7 +17,7 @@ NEWSPIDER_MODULE = 'swimtrends.spiders'
 # Postgres settings
 POSTGRES_HOST = 'localhost'
 POSTGRES_USER = 'postgres'
-POSTGRES_PASSWORD = '***'
+POSTGRES_PASSWORD = ''
 POSTGRES_DB = 'swimtrends'
 
 # Season for fixed basetime points calculation
