@@ -20,8 +20,10 @@ class Meet(scrapy.Item):
 
 class Race(scrapy.Item):
     nbr = scrapy.Field(serializer=int)
-    text = scrapy.Field()
+    title = scrapy.Field()
+    session = scrapy.Field()
     gender = scrapy.Field()
+    is_para = scrapy.Field()
     distance = scrapy.Field()
     stroke = scrapy.Field()
     relay_count = scrapy.Field(serializer=int)
@@ -32,6 +34,8 @@ class Result(scrapy.Item):
     swimmer = scrapy.Field()
     swimmer_url = scrapy.Field()
     year_of_birth = scrapy.Field(serializer=int)
+    is_para = scrapy.Field()
+    nationality = scrapy.Field()
     team = scrapy.Field()
     rank = scrapy.Field(serializer=int)
     points = scrapy.Field(serializer=int)
