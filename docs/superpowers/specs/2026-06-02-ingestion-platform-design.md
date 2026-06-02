@@ -128,6 +128,34 @@ s3://swimtrends-meet-data/
 - `meet=<id>` Hive-style prefix so Spec 2's transform can discover meets.
 - Scrape logs go to **CloudWatch** (Fargate `awslogs` driver), not S3.
 
+#### Raw structure rationale
+
+The three-file split coincides with the previous system's three Postgres tables
+(`meet`, `race`, `race_result`), but it is retained here on its own merits, not
+by inheritance:
+
+- **Entities at natural cardinality.** `meet` (1/meet), `race` (N/meet),
+  `result` (M/race) are three genuinely different schemas and cardinalities. A
+  raw landing zone should faithfully mirror the source at minimal transformation;
+  denormalizing meet/race attributes onto every result row is an *analytics*
+  concern owned by **Spec 2's curated Parquet** ("one big table"), not raw. Both
+  DuckDB and Athena join the three raw tables trivially.
+- **`splits` stay nested inside `results`** (`results[].splits[]`) in the raw
+  zone. Flattening them into a separate lap-level entity needs a stable
+  per-result surrogate key to foreign-key against — awkward to assign at scrape
+  time, especially for **relays where `Swimmer_id` is `null`** (so
+  `race_id + swimmer_id` is not a unique result key). Generating that surrogate
+  key and exploding splits into a flat `fact_split` table is deferred to Spec 2's
+  curated transform.
+- **No points in raw.** The deployed Fargate task runs `scrape_races.py` only
+  (not `calc_points.py`), so raw `results.jsonl` contains the scraper-native
+  fields plus nested `splits` and **no `points`/`points_fixed`** — points and
+  base-times management belong entirely to Spec 2. (Local `db/` files show points
+  only because `calc_points` was run locally during development.)
+
+The structure has already evolved beyond the old tables (nested `splits`, list
+`category`, `relay_count`/`class` on races), so it is not a frozen artifact.
+
 ### DynamoDB meet registry — `swimtrends-meet-registry`
 
 Partition key **`meet_id`** (String). User supplies the first three fields; the
