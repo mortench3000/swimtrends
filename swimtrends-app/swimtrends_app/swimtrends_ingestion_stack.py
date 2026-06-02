@@ -97,7 +97,7 @@ class SwimtrendsIngestionStack(Stack):
                     "image": lambda_.Runtime.PYTHON_3_12.bundling_image,
                     "command": [
                         "bash", "-c",
-                        "pip install requests beautifulsoup4 -t /asset-output && "
+                        "pip install requests beautifulsoup4 tzdata -t /asset-output && "
                         "cp scrape_races.py /asset-output/ && "
                         "cp -r ingestion /asset-output/",
                     ],

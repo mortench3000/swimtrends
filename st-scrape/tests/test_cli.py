@@ -76,3 +76,8 @@ def test_dispatch_all_force_backfill(dynamodb_table):
     cli.run(["dispatch", "--all", "--force"], registry=None,
             invoke=lambda payload: calls.append(payload))
     assert calls == [{"force": True}]
+
+
+def test_dispatch_all_without_force_errors(dynamodb_table):
+    with pytest.raises(SystemExit):
+        cli.run(["dispatch", "--all"], registry=None, invoke=lambda payload: None)

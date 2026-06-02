@@ -72,6 +72,9 @@ def run(argv, *, registry, invoke):
         if args.force and not args.meet_id and not args.all:
             raise SystemExit("Refusing to force-dispatch every scheduled meet without --all. "
                              "Use 'dispatch --all --force' to backfill, or pass a meet_id.")
+        if args.all and not args.force:
+            raise SystemExit("--all only applies with --force (e.g. 'dispatch --all --force'). "
+                             "A plain due-check cycle is just 'dispatch'.")
         payload = {}
         if args.meet_id:
             payload["meet_ids"] = [args.meet_id]

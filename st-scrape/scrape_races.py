@@ -825,6 +825,10 @@ if __name__ == "__main__":
         # --- Scrape Race List ---
         extracted_races = scrape_race_list(html, meet_id) # Pass meet_id
 
+        # Collected below; initialised here so the completeness check after the
+        # try-block can reference it even when no races were found.
+        all_results = []
+
         # --- Scrape Results for Each Race ---
         if extracted_races:
             print(f"\n--- Scraping Results for {len(extracted_races)} Races ---")
@@ -901,7 +905,25 @@ if __name__ == "__main__":
         else:
             print("No races found or error during parsing.")
 
+        # The Fargate entrypoint treats a non-zero exit as a failed scrape. A
+        # dispatched, completed meet must yield all three outputs; if any is
+        # missing, surface it as a failure so the registry records it (and
+        # retries) instead of silently marking the meet 'scraped' with partial
+        # or empty data. SystemExit derives from BaseException, so it is NOT
+        # swallowed by the except Exception handler below.
+        if not meet_details or not extracted_races or not all_results:
+            print(
+                "Scrape produced incomplete data "
+                f"(meet_info={bool(meet_details)}, "
+                f"races={len(extracted_races) if extracted_races else 0}, "
+                f"results={len(all_results)}).",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     except requests.exceptions.RequestException as e:
         print(f"Error fetching URL {url}: {e}", file=sys.stderr)
+        sys.exit(1)
     except Exception as e:
         print(f"An unexpected error occurred: {e}", file=sys.stderr)
+        sys.exit(1)
