@@ -1,0 +1,10 @@
+db/
+logs/
+tests/
+__pycache__/
+*.pyc
+*.pdf
+*.md
+*.html
+backup/
+.venv/
