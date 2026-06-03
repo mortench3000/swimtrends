@@ -765,6 +765,7 @@ if __name__ == "__main__":
     # both into a clean list, e.g. ['DM-L', 'DMJ-L'].
     meet_category = [c.strip() for token in args.meet_category for c in token.split(',') if c.strip()]
     url = f"https://xn--svmmetider-1cb.dk/staevne/?{meet_id}#resultater"
+    start_time = time.time()
 
     # Ensure output dirs exist and mirror all console output into a per-meet log.
     os.makedirs(DB_DIR, exist_ok=True)
@@ -904,6 +905,14 @@ if __name__ == "__main__":
                 print("-" * 20) # Separator after each race info block
         else:
             print("No races found or error during parsing.")
+
+        elapsed = time.time() - start_time
+        mins, secs = divmod(int(round(elapsed)), 60)
+        print(f"\n===== Scrape summary for meet {meet_id} =====")
+        print(f"  Races scraped:   {len(extracted_races)}")
+        print(f"  Results scraped: {len(all_results)}")
+        print(f"  Duration:        {mins}m {secs}s")
+        print("=" * 44)
 
         # The Fargate entrypoint treats a non-zero exit as a failed scrape. A
         # dispatched, completed meet must yield all three outputs; if any is

@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+# Stream stdout/stderr unbuffered so CloudWatch shows scrape progress live
+# (otherwise Python block-buffers output and logs only appear in bursts).
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 # Install runtime deps first for layer caching.
