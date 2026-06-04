@@ -341,8 +341,15 @@ def scrape_race_list(html_content, meet_id): # Added meet_id parameter
 
                 original_race_type = cells[2].get_text(strip=True)
                 # Map the site's Danish race-type label to our English output value.
+                # 'Direkte finale' (a final swum without prelims) must be checked
+                # BEFORE the generic 'finale' branch -- otherwise the substring
+                # match collapses it into 'Final' and we lose the distinction.
+                # It matters: at these meets a para event appears as exactly such a
+                # direct final duplicating an event that also has Indledende+Finale.
                 race_type_lower = original_race_type.lower()
-                if 'finale' in race_type_lower:
+                if 'direkte' in race_type_lower:
+                    mapped_race_type = 'Timed final'
+                elif 'finale' in race_type_lower:
                     mapped_race_type = 'Final'
                 elif race_type_lower.startswith('swim-off'):
                     mapped_race_type = 'Swim-off'
@@ -539,6 +546,21 @@ def scrape_split_times(split_url):
     return splits
 
 
+def _results_search_keyword(expected_race_type):
+    """Danish box-header keyword used to locate the results table for a race type.
+
+    Headers on the per-race results page are Danish. A 'Timed final'
+    ('Direkte finale') header contains 'finale', so it shares the 'finale'
+    keyword -- it must not fall through to the 'indledende' (prelim) default.
+    """
+    type_lower = expected_race_type.lower()
+    if type_lower in ('final', 'finale', 'timed final'):
+        return 'finale'
+    if type_lower.startswith('swim-off'):
+        return 'swim-off'
+    return 'indledende'  # 'Heats'/preliminary is the default
+
+
 def scrape_race_results(race_url, expected_race_type, race_id_for_results, is_relay=False): # Added race_id, relay flag
     """
     Scrapes the result rows from a specific race results page.
@@ -580,13 +602,7 @@ def scrape_race_results(race_url, expected_race_type, race_id_for_results, is_re
 
         # The page's box headers are in Danish, so translate our (English)
         # expected type back to the Danish keyword used to locate the table.
-        type_lower = expected_race_type.lower()
-        if type_lower in ('final', 'finale'):
-            search_keyword = 'finale'
-        elif type_lower.startswith('swim-off'):
-            search_keyword = 'swim-off'
-        else:
-            search_keyword = 'indledende' # 'Heats'/preliminary is the default
+        search_keyword = _results_search_keyword(expected_race_type)
 
         # Find the correct table based on the expected type in the header
         for box in result_boxes:
