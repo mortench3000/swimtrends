@@ -40,11 +40,25 @@ def build_parser():
                       help="Target every scheduled meet (use with --force to backfill).")
     disp.add_argument("--force", action="store_true",
                       help="Bypass the grace/completeness gates.")
+
+    cur = sub.add_parser("curate", help="Run the curated transform.")
+    cur.add_argument("meet_id", nargs="?", default=None)
+    cur.add_argument("--all", action="store_true",
+                     help="Curate every meet (full rebuild).")
+
+    cls = sub.add_parser("class", help="Manage authoritative class overrides.")
+    cls_sub = cls.add_subparsers(dest="class_command", required=True)
+    cls_set = cls_sub.add_parser("set", help="Set an override for one race.")
+    cls_set.add_argument("meet_id")
+    cls_set.add_argument("race_id", type=int)
+    cls_set.add_argument("klass", choices=["open", "para"])
+    cls_set.add_argument("--reason", default="")
+
     return parser
 
 
-def run(argv, *, registry, invoke):
-    """Execute one CLI command. registry/invoke are injected for testing."""
+def run(argv, *, registry, invoke, curate=None, overrides=None):
+    """Execute one CLI command. registry/invoke/curate/overrides injected."""
     args = build_parser().parse_args(argv)
 
     if args.command == "register":
@@ -87,6 +101,24 @@ def run(argv, *, registry, invoke):
             print(f"Dispatcher result: {result}")
         return
 
+    if args.command == "curate":
+        if args.all and args.meet_id:
+            raise SystemExit("Pass a meet_id OR --all, not both.")
+        if not args.all and not args.meet_id:
+            raise SystemExit("curate needs a meet_id or --all.")
+        payload = {"all": True} if args.all else {"meet_ids": [args.meet_id]}
+        curate(payload)
+        print(f"Curate invoked with payload: {json.dumps(payload)}")
+        return
+
+    if args.command == "class":
+        if args.class_command == "set":
+            overrides.set_override(args.meet_id, args.race_id, args.klass,
+                                   reason=args.reason)
+            print(f"Override set: meet {args.meet_id} race {args.race_id} "
+                  f"-> {args.klass}")
+        return
+
 
 def main():
     import boto3
@@ -106,7 +138,22 @@ def main():
         body = resp["Payload"].read().decode("utf-8")
         return json.loads(body) if body else None
 
-    run(sys.argv[1:], registry=registry, invoke=invoke)
+    from curate.overrides import ClassOverrides
+
+    overrides = ClassOverrides(os.environ["OVERRIDES_TABLE"]) \
+        if os.environ.get("OVERRIDES_TABLE") else None
+    curator_fn = os.environ.get("CURATOR_FUNCTION")
+
+    def curate(payload):
+        if curator_fn is None:
+            raise SystemExit("CURATOR_FUNCTION not set.")
+        resp = lambda_client.invoke(
+            FunctionName=curator_fn, InvocationType="Event",
+            Payload=json.dumps(payload).encode("utf-8"))
+        return resp["StatusCode"]
+
+    run(sys.argv[1:], registry=registry, invoke=invoke,
+        curate=curate, overrides=overrides)
 
 
 if __name__ == "__main__":
