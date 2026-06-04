@@ -1,0 +1,14 @@
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Shared scraper module (for any reuse) + the curate package.
+COPY scrape_races.py .
+COPY curate/ ./curate/
+
+# Reads MEET_ID / CURATED_BUCKET / OVERRIDES_TABLE / SNS_TOPIC_ARN from the env.
+ENTRYPOINT ["python", "-m", "curate.run"]
