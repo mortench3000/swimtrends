@@ -73,6 +73,20 @@ def test_deadline_forces_dispatch_and_notifies(dynamodb_table):
     assert any("deadline" in s.lower() for s, _ in rec.notes)
 
 
+def test_past_deadline_with_results_dispatches_silently(dynamodb_table):
+    # A historical backfill is always past its deadline, but the results page
+    # has been complete for years. It must scrape WITHOUT the false alarm.
+    reg = MeetRegistry(TABLE_NAME, region="eu-west-1")
+    reg.put_meet("1", ["DO"], "2021-07-21")
+    rec = Recorder()
+    dispatched = dispatcher.run_cycle(
+        reg, now=at(2026, 6, 4, 8), run_task=rec.run_task,
+        has_results=lambda mid: True, notify=rec.notify)
+    assert dispatched == ["1"]
+    assert rec.launched == [("1", ["DO"])]
+    assert rec.notes == []
+
+
 def test_force_bypasses_gates(dynamodb_table):
     reg = MeetRegistry(TABLE_NAME, region="eu-west-1")
     reg.put_meet("1", ["DO"], "2024-07-11")

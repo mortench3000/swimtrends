@@ -44,7 +44,10 @@ def run_cycle(registry, *, now, run_task, has_results, notify,
                 if not has_results(meet_id):
                     continue  # not ready — re-check next hour
             elif verdict == completion.DEADLINE:
-                forced_by_deadline = True
+                # Past deadline we force-scrape regardless, but only raise the
+                # alarm when the page genuinely never showed results. Otherwise
+                # every historical backfill (always past deadline) false-alarms.
+                forced_by_deadline = not has_results(meet_id)
 
         # Idempotent claim: lose the race -> another run already took it.
         if not registry.claim(meet_id):
