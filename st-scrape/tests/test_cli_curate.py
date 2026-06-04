@@ -2,17 +2,6 @@
 from ingestion import cli
 
 
-class FakeRegistry:
-    def __init__(self, ids):
-        self._ids = ids
-
-    def scheduled_meets(self):  # unused here but matches interface
-        return []
-
-    def all_meet_ids(self):
-        return self._ids
-
-
 class FakeOverrides:
     def __init__(self):
         self.calls = []
