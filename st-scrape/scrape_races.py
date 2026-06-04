@@ -431,11 +431,6 @@ def scrape_race_list(html_content, meet_id): # Added meet_id parameter
                 except ValueError:
                     print(f"    Warning: Could not convert race number '{race_number}' to int.", file=sys.stderr)
 
-                # Classify the race: race numbers >= 100 are para races,
-                # everything else is a regular ('open') race. If the number
-                # could not be parsed we cannot tell, so default to 'open'.
-                classification = 'para' if (race_number_int is not None and race_number_int >= 100) else 'open'
-
                 races.append({
                     'meet_id': int(meet_id),      # Convert meet_id to int
                     'race_id': extracted_race_id, # Already int or None
@@ -446,12 +441,33 @@ def scrape_race_list(html_content, meet_id): # Added meet_id parameter
                     'gender': gender,     # Added gender ('X' for mixed relays)
                     'relay_count': relay_count, # 1 for individual events, N for an N-leg relay
                     'type': mapped_race_type, # Use the mapped type
-                    'class': classification, # 'para' (number >= 100) or 'open'
+                    # 'class' is assigned by _classify_races below (needs the
+                    # full meet to spot the para 'Timed final' duplicates).
                     'link': race_href # Re-added link for result scraping
                 })
             except Exception as e:
                 print(f"Error processing row: {row}. Error: {e}", file=sys.stderr)
 
+    return _classify_races(races)
+
+
+def _classify_races(races):
+    """Set each race's 'class' to 'para' or 'open' using a meet-level rule.
+
+    Para events carry no name or results-page marker -- they appear as a
+    'Timed final' ('Direkte finale') duplicating an event that is ALSO run as
+    Indledende/Finale in the same meet. Plain distance/relay timed finals
+    (800/1500 free, relays) have no such prelim/final twin and stay 'open'.
+
+    The legacy race-number>=100 convention is unreliable -- meet 9775 numbers
+    four of its five para events below 100 -- so it is not used. Authoritative
+    classification with overrides is a downstream (curated) concern; this is the
+    raw zone's best-effort guess from data the meet page actually provides.
+    """
+    prelim_final_names = {r['name'] for r in races if r.get('type') in ('Heats', 'Final')}
+    for r in races:
+        is_para = r.get('type') == 'Timed final' and r.get('name') in prelim_final_names
+        r['class'] = 'para' if is_para else 'open'
     return races
 
 

@@ -51,3 +51,43 @@ def test_results_keyword_other_types_unchanged():
     assert scrape_races._results_search_keyword("Swim-off") == "swim-off"
     assert scrape_races._results_search_keyword("Heats") == "indledende"
     assert scrape_races._results_search_keyword("Indledende") == "indledende"
+
+
+# --- meet-level para classification --------------------------------------
+# para = a 'Timed final' duplicating an event also run as Heats/Final in the
+# same meet. The old race-number>=100 rule is wrong for 9775 (para below 100).
+
+def _r(number, name, rtype):
+    return {"number": number, "name": name, "type": rtype}
+
+
+def test_para_is_timed_final_duplicating_a_prelim_final_event():
+    races = [
+        _r(43, "100 Fri - Damer", "Heats"),
+        _r(43, "100 Fri - Damer", "Final"),
+        _r(91, "100 Fri - Damer", "Timed final"),   # para: same event also has Heats/Final
+    ]
+    scrape_races._classify_races(races)
+    klass = {(r["type"]): r["class"] for r in races}
+    assert klass == {"Heats": "open", "Final": "open", "Timed final": "para"}
+
+
+def test_distance_and_relay_timed_finals_stay_open():
+    races = [
+        _r(7, "800 Fri - Damer", "Timed final"),       # no Heats/Final twin -> able-bodied
+        _r(20, "4 x 100 Fri - Herrer", "Timed final"),  # relay direct final -> able-bodied
+    ]
+    scrape_races._classify_races(races)
+    assert all(r["class"] == "open" for r in races)
+
+
+def test_para_low_number_below_100_is_still_caught():
+    # 9775's regression: para event numbered 41 (< 100) must NOT be 'open'.
+    races = [
+        _r(8, "50 Fri - Damer", "Heats"),
+        _r(8, "50 Fri - Damer", "Final"),
+        _r(41, "50 Fri - Damer", "Timed final"),
+    ]
+    scrape_races._classify_races(races)
+    para = [r for r in races if r["class"] == "para"]
+    assert [r["number"] for r in para] == [41]
