@@ -86,6 +86,47 @@ def test_reset_returns_to_scheduled(dynamodb_table):
     assert "last_error" not in item
 
 
+def test_claim_records_claimed_at(dynamodb_table):
+    reg = make_registry()
+    reg.put_meet("10970", ["DO"], "2024-07-11")
+    reg.claim("10970", when="2026-06-17T09:00:00Z")
+    item = dynamodb_table.get_item(Key={"meet_id": "10970"})["Item"]
+    assert item["claimed_at"] == "2026-06-17T09:00:00Z"
+
+
+def test_scraping_meets_returns_only_in_flight(dynamodb_table):
+    reg = make_registry()
+    reg.put_meet("1", ["DO"], "2024-01-01")  # scheduled
+    reg.put_meet("2", ["DO"], "2024-01-02")
+    reg.claim("2")  # scraping
+    reg.put_meet("3", ["DO"], "2024-01-03")
+    reg.claim("3")
+    reg.mark_scraped("3", "Meet 3", 10, 3)  # scraped
+    reg.put_meet("4", ["DO"], "2024-01-04")
+    reg.claim("4")
+    reg.mark_failed("4", "boom")  # failed
+    ids = {m["meet_id"] for m in reg.scraping_meets()}
+    assert ids == {"2"}
+
+
+def test_mark_scraped_clears_claimed_at(dynamodb_table):
+    reg = make_registry()
+    reg.put_meet("10970", ["DO"], "2024-07-11")
+    reg.claim("10970")
+    reg.mark_scraped("10970", "Meet", 10, 3)
+    item = dynamodb_table.get_item(Key={"meet_id": "10970"})["Item"]
+    assert "claimed_at" not in item
+
+
+def test_mark_failed_clears_claimed_at(dynamodb_table):
+    reg = make_registry()
+    reg.put_meet("10970", ["DO"], "2024-07-11")
+    reg.claim("10970")
+    reg.mark_failed("10970", "boom")
+    item = dynamodb_table.get_item(Key={"meet_id": "10970"})["Item"]
+    assert "claimed_at" not in item
+
+
 def test_get_returns_none_for_missing(dynamodb_table):
     reg = make_registry()
     assert reg.get("does-not-exist") is None

@@ -105,6 +105,7 @@ class SwimtrendsIngestionStack(Stack):
             ),
             environment={
                 "REGISTRY_TABLE": registry.table_name,
+                "RAW_BUCKET": RAW_BUCKET_NAME,
                 "SNS_TOPIC_ARN": topic.topic_arn,
                 "ECS_CLUSTER": cluster.cluster_arn,
                 "TASK_DEFINITION": task_def.task_definition_arn,
@@ -114,11 +115,14 @@ class SwimtrendsIngestionStack(Stack):
                 "SECURITY_GROUP_ID": scrape_sg.security_group_id,
                 "REFERENCE_TZ": "Europe/Copenhagen",
                 "MAX_ATTEMPTS": "3",
+                "REAP_TTL_HOURS": "6",
             },
         )
 
-        # Dispatcher permissions: read/update registry, launch tasks, alert.
+        # Dispatcher permissions: read/update registry, launch tasks, alert,
+        # and read raw objects to reconcile meets orphaned in 'scraping'.
         registry.grant_read_write_data(dispatcher_fn)
+        raw_bucket.grant_read(dispatcher_fn, objects_key_pattern="raw/*")
         topic.grant_publish(dispatcher_fn)
         dispatcher_fn.add_to_role_policy(iam.PolicyStatement(
             actions=["ecs:RunTask"],
