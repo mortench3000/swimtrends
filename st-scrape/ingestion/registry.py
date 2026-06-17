@@ -34,9 +34,8 @@ class MeetRegistry:
     def get(self, meet_id):
         return self._table.get_item(Key={"meet_id": meet_id}).get("Item")
 
-    def scheduled_meets(self):
-        """All meets eligible for (re)scraping: status in scheduled|failed."""
-        items, kwargs = [], {"FilterExpression": Attr("status").is_in(list(PICKABLE))}
+    def _scan(self, condition):
+        items, kwargs = [], {"FilterExpression": condition}
         while True:
             resp = self._table.scan(**kwargs)
             items.extend(resp.get("Items", []))
@@ -44,16 +43,32 @@ class MeetRegistry:
                 return items
             kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
-    def claim(self, meet_id):
-        """Atomically move scheduled|failed -> scraping and bump attempts.
+    def scheduled_meets(self):
+        """All meets eligible for (re)scraping: status in scheduled|failed."""
+        return self._scan(Attr("status").is_in(list(PICKABLE)))
+
+    def scraping_meets(self):
+        """All meets currently claimed and in flight (status == scraping).
+
+        The reaper inspects these for orphans whose container died before
+        recording a terminal status."""
+        return self._scan(Attr("status").eq("scraping"))
+
+    def claim(self, meet_id, when=None):
+        """Atomically move scheduled|failed -> scraping, bump attempts, and
+        stamp claimed_at so the reaper can detect a stale (orphaned) claim.
         Returns True if this caller won the claim, False if already taken."""
         try:
             self._table.update_item(
                 Key={"meet_id": meet_id},
-                UpdateExpression="SET #s = :scraping ADD attempts :one",
+                UpdateExpression="SET #s = :scraping, claimed_at = :t ADD attempts :one",
                 ConditionExpression=Attr("status").is_in(list(PICKABLE)),
                 ExpressionAttributeNames={"#s": "status"},
-                ExpressionAttributeValues={":scraping": "scraping", ":one": 1},
+                ExpressionAttributeValues={
+                    ":scraping": "scraping",
+                    ":one": 1,
+                    ":t": _now_iso() if when is None else when,
+                },
             )
             return True
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
@@ -64,7 +79,7 @@ class MeetRegistry:
             Key={"meet_id": meet_id},
             UpdateExpression=(
                 "SET #s = :scraped, meet_name = :n, result_count = :rc, "
-                "race_count = :rac, last_scraped_at = :t REMOVE last_error"
+                "race_count = :rac, last_scraped_at = :t REMOVE last_error, claimed_at"
             ),
             ConditionExpression=Attr("meet_id").exists(),
             ExpressionAttributeNames={"#s": "status"},
@@ -80,7 +95,10 @@ class MeetRegistry:
     def mark_failed(self, meet_id, error, when=None):
         self._table.update_item(
             Key={"meet_id": meet_id},
-            UpdateExpression="SET #s = :failed, last_error = :e, last_scraped_at = :t",
+            UpdateExpression=(
+                "SET #s = :failed, last_error = :e, last_scraped_at = :t "
+                "REMOVE claimed_at"
+            ),
             ConditionExpression=Attr("meet_id").exists(),
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={

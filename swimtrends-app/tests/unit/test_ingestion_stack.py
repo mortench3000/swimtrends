@@ -83,3 +83,26 @@ def test_dispatcher_can_run_ecs_tasks():
             ]),
         },
     })
+
+
+def test_dispatcher_has_raw_bucket_for_reaper():
+    # The reaper reconciles orphaned meets from the raw zone, so the dispatcher
+    # needs the bucket name and read access to raw/*.
+    t = _synth()
+    t.has_resource_properties("AWS::Lambda::Function", {
+        "Handler": "ingestion.dispatcher.lambda_handler",
+        "Environment": {"Variables": Match.object_like({
+            "RAW_BUCKET": "swimtrends-meet-data",
+            "REAP_TTL_HOURS": "6",
+        })},
+    })
+    t.has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": {
+            "Statement": Match.array_with([
+                Match.object_like({
+                    "Action": Match.array_with(
+                        [Match.string_like_regexp("^s3:GetObject")]),
+                }),
+            ]),
+        },
+    })
