@@ -1,0 +1,3 @@
+-r requirements.txt
+pytest>=7.4
+moto[dynamodb,s3]>=5.0
