@@ -54,10 +54,19 @@ def build_parser():
     cls_set.add_argument("klass", choices=["open", "para"])
     cls_set.add_argument("--reason", default="")
 
+    qry = sub.add_parser("query", help="Open a DuckDB analytics session over the curated zone.")
+    qry.add_argument("--sql", default=None,
+                     help="Run a single SQL statement and print the result, then exit.")
+
     return parser
 
 
-def run(argv, *, registry, invoke, curate=None, overrides=None):
+def _default_query_connect():
+    from analytics import loader
+    return loader.connect()
+
+
+def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
     """Execute one CLI command. registry/invoke/curate/overrides injected."""
     args = build_parser().parse_args(argv)
 
@@ -118,6 +127,20 @@ def run(argv, *, registry, invoke, curate=None, overrides=None):
             print(f"Override set: meet {args.meet_id} race {args.race_id} "
                   f"-> {args.klass}")
         return
+
+    if args.command == "query":
+        con = (connect or _default_query_connect)()
+        if args.sql:
+            print(con.sql(args.sql))
+            return 0
+        import code
+        banner = ("swimtrends analytics — DuckDB ready. "
+                  "`con` is the connection; sql('SELECT …') prints a result.\n"
+                  "Views: personal_best, event_leaderboard, swimmer_progression, "
+                  "cross_era_best, club_leaderboard, age_group_ranking, pacing, "
+                  "event_standard_by_season, final_cutline_by_season, …")
+        code.interact(banner=banner, local={"con": con, "sql": lambda q: print(con.sql(q))})
+        return 0
 
 
 def main():
