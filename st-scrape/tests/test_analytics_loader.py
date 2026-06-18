@@ -41,3 +41,18 @@ def test_results_derives_age_and_phase():
         "SELECT age, phase FROM results WHERE result_id = 'r1'").fetchone()
     assert age == 16
     assert phase == "heats"
+
+
+def test_assemble_sql_includes_s3_source_binding():
+    sql = loader.assemble_sql()
+    assert "read_parquet('s3://swimtrends-meet-data/curated/obt_result/" in sql
+    assert "credential_chain" in sql
+    assert "hive_partitioning = false" in sql  # season/course come from file columns
+    # base views must come after the source binding
+    assert sql.index("CREATE SECRET") < sql.index("CREATE OR REPLACE VIEW results")
+
+
+def test_assemble_sql_binds_all_five_curated_tables():
+    sql = loader.assemble_sql()
+    for table in ["obt_result", "dim_meet", "dim_race", "fact_result", "fact_split"]:
+        assert f"curated/{table}/" in sql
