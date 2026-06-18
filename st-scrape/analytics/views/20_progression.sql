@@ -2,6 +2,7 @@
 -- delta_centiseconds < 0 means faster (an improvement).
 CREATE OR REPLACE VIEW swimmer_progression AS
 SELECT
+    result_id,
     swimmer_id, name, gender, distance, stroke, course,
     season, meet_date, meet_name,
     completed_centiseconds, completed_time, points,
@@ -11,7 +12,7 @@ FROM individual_results
 WHERE completed_centiseconds IS NOT NULL
 WINDOW w_prog AS (
     PARTITION BY swimmer_id, gender, distance, stroke, course
-    ORDER BY meet_date
+    ORDER BY meet_date, result_id
 );
 
 -- Best performances of all time, era-normalised via points_fixed.

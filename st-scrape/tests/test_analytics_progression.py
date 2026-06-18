@@ -27,6 +27,21 @@ def test_swimmer_progression_delta_vs_previous_swim():
     assert rows == [("2024-03-01", None), ("2024-06-01", -100)]
 
 
+def test_swimmer_progression_same_date_is_deterministic():
+    # Heats + final on the same date must order by result_id, not arbitrarily.
+    con = _con([
+        dict(result_id="r2-1", swimmer_id="s1", rank=1, completed_centiseconds=6000,
+             meet_date="2024-03-01", season=2024, birth_year=2010, **EVENT),  # final, later id
+        dict(result_id="r1-1", swimmer_id="s1", rank=3, completed_centiseconds=6100,
+             meet_date="2024-03-01", season=2024, birth_year=2010, **EVENT),  # heat, earlier id
+    ])
+    rows = con.execute(
+        "SELECT result_id, delta_centiseconds FROM swimmer_progression "
+        "WHERE swimmer_id='s1' ORDER BY result_id").fetchall()
+    # ordered by (meet_date, result_id): r1-1 first (no prev), then r2-1 = 6000-6100 = -100
+    assert rows == [("r1-1", None), ("r2-1", -100)]
+
+
 def test_cross_era_best_ranks_by_points_fixed():
     con = _con([
         dict(result_id="a", swimmer_id="s1", rank=1, completed_centiseconds=5900,
