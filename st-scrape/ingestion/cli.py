@@ -144,6 +144,15 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
 
 
 def main():
+    argv = sys.argv[1:]
+
+    # `query` is a local, read-only analytics session — it needs only AWS creds
+    # for S3, not the ingestion/curate wiring or its env vars. Short-circuit
+    # before touching REGISTRY_TABLE/DISPATCHER_FUNCTION so an analyst can run it.
+    if build_parser().parse_args(argv).command == "query":
+        run(argv, registry=None, invoke=None)
+        return
+
     import boto3
 
     from ingestion.registry import MeetRegistry
@@ -175,7 +184,7 @@ def main():
             Payload=json.dumps(payload).encode("utf-8"))
         return resp["StatusCode"]
 
-    run(sys.argv[1:], registry=registry, invoke=invoke,
+    run(argv, registry=registry, invoke=invoke,
         curate=curate, overrides=overrides)
 
 
