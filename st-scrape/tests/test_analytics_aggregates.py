@@ -53,3 +53,21 @@ def test_meet_summary_counts():
         "SELECT results, races, swimmers, top_points, top_points_swimmer "
         "FROM meet_summary WHERE meet_id='m1'").fetchone()
     assert row == (2, 1, 2, 600, "s1")
+
+
+def test_meet_summary_standout_ignores_relay_entries():
+    # A relay (swimmer_id NULL) holds the highest points; the standout swim must
+    # still be the top individual swimmer, not the relay.
+    con = _con([
+        dict(result_id="a", race_id=1, swimmer_id="s1", meet_id="m1", meet_name="M1",
+             rank=1, points=600, completed_centiseconds=2600, season=2024,
+             birth_year=2008, **EVENT),
+        dict(result_id="b", race_id=2, swimmer_id=None, meet_id="m1", meet_name="M1",
+             rank=1, points=700, completed_centiseconds=10000, season=2024,
+             relay_count=4, type="Final", gender="M", distance=200, stroke="Free",
+             course="LCM"),
+    ])
+    row = con.execute(
+        "SELECT results, swimmers, top_points, top_points_swimmer "
+        "FROM meet_summary WHERE meet_id='m1'").fetchone()
+    assert row == (2, 1, 600, "s1")

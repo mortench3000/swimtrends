@@ -44,7 +44,7 @@ SELECT
     count(*)                    AS results,
     count(DISTINCT race_id)     AS races,
     count(DISTINCT swimmer_id)  AS swimmers,
-    max(points)                 AS top_points,
-    arg_max(swimmer_id, points) AS top_points_swimmer
+    max(points) FILTER (WHERE swimmer_id IS NOT NULL)                 AS top_points,
+    arg_max(swimmer_id, points) FILTER (WHERE swimmer_id IS NOT NULL) AS top_points_swimmer
 FROM results
 GROUP BY meet_id;
