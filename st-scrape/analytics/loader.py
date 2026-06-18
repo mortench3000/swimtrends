@@ -38,7 +38,14 @@ def assemble_sql():
 
 
 def connect():
-    """Production: an in-memory DuckDB bound to the curated zone with all views."""
+    """Production: an in-memory DuckDB bound to the curated zone with all views.
+
+    Defaults AWS_PROFILE to 'swimtrends' (overridable) so the credential_chain
+    secret in bootstrap.sql resolves this project's credentials from
+    ~/.aws/credentials without the caller having to export it."""
+    import os
+
+    os.environ.setdefault("AWS_PROFILE", "swimtrends")
     con = duckdb.connect()
     bind_s3(con)
     create_views(con)

@@ -1,5 +1,8 @@
--- S3 access for DuckDB: extensions + a credential-chain secret using the
--- 'swimtrends' AWS profile in eu-west-1.
+-- S3 access for DuckDB: extensions + a credential-chain secret. The AWS SDK
+-- default chain resolves credentials (honouring the AWS_PROFILE env var, which
+-- loader.connect() defaults to 'swimtrends'), reading ~/.aws/credentials. We do
+-- NOT pin PROFILE/CHAIN here: DuckDB's profile resolver only reads ~/.aws/config,
+-- but this project's profile lives in ~/.aws/credentials.
 INSTALL httpfs;
 LOAD httpfs;
 INSTALL aws;
@@ -8,8 +11,6 @@ LOAD aws;
 CREATE SECRET IF NOT EXISTS swimtrends_s3 (
     TYPE s3,
     PROVIDER credential_chain,
-    CHAIN 'sso;sts;env;config',
-    PROFILE 'swimtrends',
     REGION 'eu-west-1'
 );
 
