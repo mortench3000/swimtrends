@@ -1,0 +1,8 @@
+# Optional analyst tooling for interactive exploration in Jupyter / VS Code.
+# Not needed by the platform itself — only for notebook-based analysis of the
+# curated zone via analytics.loader. Install with:
+#   .venv/bin/pip install -r requirements-notebook.txt
+-r requirements.txt
+ipykernel>=6.29
+pandas>=2.2
+matplotlib>=3.8
