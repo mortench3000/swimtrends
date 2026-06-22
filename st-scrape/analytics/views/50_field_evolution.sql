@@ -17,6 +17,7 @@ SELECT
     quantile_cont(completed_centiseconds, 0.5)     AS median_cs,
     quantile_cont(completed_centiseconds, 0.25)    AS p25_cs,
     quantile_cont(completed_centiseconds, 0.75)    AS p75_cs,
+    avg(completed_centiseconds) FILTER (WHERE time_rank <= 3) AS top3_avg_cs,
     avg(completed_centiseconds) FILTER (WHERE time_rank <= 8) AS top8_avg_cs
 FROM (
     SELECT *,

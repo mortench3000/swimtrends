@@ -81,3 +81,13 @@ def test_event_standard_by_season_best_and_count():
         "SELECT swims, best_cs FROM event_standard_by_season "
         "WHERE category='DM-L' AND season=2024").fetchone()
     assert row == (10, 15000)
+
+
+def test_event_standard_top3_and_top8_averages():
+    # 10 swims at 15000,15010,...,15090. Mean of 3 fastest = 15010;
+    # mean of 8 fastest = 15035.
+    con = _con(obt=_heats(10, 2024, 15000), meets=MEETS)
+    row = con.execute(
+        "SELECT top3_avg_cs, top8_avg_cs FROM event_standard_by_season "
+        "WHERE category='DM-L' AND season=2024").fetchone()
+    assert row == (15010, 15035)
