@@ -57,6 +57,24 @@ def test_cutline_at_macro_supports_other_n():
     assert row == (15000 + 5 * 10,)  # 6th fastest = index 5
 
 
+def test_final_cutline_exposes_entrants_count():
+    # 10 heat swims in the field -> entrants=10 alongside the rank-8 cut-line,
+    # so an analyst can tell whether the cut-line is well-defined (entrants>=8).
+    con = _con(obt=_heats(10, 2024, 15000), meets=MEETS)
+    row = con.execute(
+        "SELECT cutline_centiseconds, entrants FROM final_cutline_by_season "
+        "WHERE category='DM-L' AND season=2024").fetchone()
+    assert row == (15000 + 7 * 10, 10)
+
+
+def test_cutline_at_macro_exposes_entrants_count():
+    con = _con(obt=_heats(10, 2024, 15000), meets=MEETS)
+    row = con.execute(
+        "SELECT entrants FROM cutline_at(6) "
+        "WHERE category='DM-L' AND season=2024").fetchone()
+    assert row == (10,)
+
+
 def test_event_standard_by_season_best_and_count():
     con = _con(obt=_heats(10, 2024, 15000), meets=MEETS)
     row = con.execute(

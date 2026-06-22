@@ -57,7 +57,11 @@ DuckDB result; the `q(...)` helper returns a pandas DataFrame for tables/plots.
 - **Pacing:** `pacing`
 - **Field evolution:** `event_standard_by_season`, `final_cutline_by_season`,
   `cutline_at(n)` (cut-line for an arbitrary final size), `results_by_category`,
-  `prelim_ranked`
+  `prelim_ranked`. `final_cutline_by_season` / `cutline_at(n)` expose an
+  `entrants` column (the prelim field size) so you can tell a well-defined
+  cut-line (`entrants >= n`) from a thin field. An event swum as a *timed final*
+  (no heats — common for small fields) has no prelim, so it is **absent** from
+  these views entirely; use `event_standard_by_season` for an unbroken trend.
 
 Base views: `results` (1 row per result, with `age`/`phase`/`is_relay`/`is_dq`)
 and `individual_results` (real individual swims only).

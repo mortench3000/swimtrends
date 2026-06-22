@@ -30,6 +30,9 @@ FROM (
 GROUP BY category, season, course, gender, distance, stroke;
 
 -- Preliminary swims ranked by time within championship/event/season.
+-- `entrants` is the size of the prelim field, so a cut-line consumer can tell
+-- whether rank N is well-defined (entrants >= N) or the event was too small /
+-- swum as a timed final with no heats at all (then it is absent here entirely).
 CREATE OR REPLACE VIEW prelim_ranked AS
 SELECT
     category, season, course, gender, distance, stroke,
@@ -37,7 +40,10 @@ SELECT
     row_number() OVER (
         PARTITION BY category, season, course, gender, distance, stroke
         ORDER BY completed_centiseconds
-    ) AS heat_rank
+    ) AS heat_rank,
+    count(*) OVER (
+        PARTITION BY category, season, course, gender, distance, stroke
+    ) AS entrants
 FROM results_by_category
 WHERE phase = 'heats' AND completed_centiseconds IS NOT NULL;
 
@@ -45,6 +51,7 @@ WHERE phase = 'heats' AND completed_centiseconds IS NOT NULL;
 CREATE OR REPLACE VIEW final_cutline_by_season AS
 SELECT
     category, season, course, gender, distance, stroke,
+    entrants,
     completed_centiseconds AS cutline_centiseconds,
     completed_time         AS cutline_time,
     swimmer_id, name
@@ -55,6 +62,7 @@ WHERE heat_rank = 8;
 CREATE OR REPLACE MACRO cutline_at(n) AS TABLE
 SELECT
     category, season, course, gender, distance, stroke,
+    entrants,
     completed_centiseconds AS cutline_centiseconds,
     completed_time         AS cutline_time,
     swimmer_id, name
