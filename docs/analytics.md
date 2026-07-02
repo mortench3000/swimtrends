@@ -52,7 +52,9 @@ DuckDB result; the `q(...)` helper returns a pandas DataFrame for tables/plots.
 
 ## View catalog
 - **Best times / ranking:** `personal_best`, `season_best`, `event_leaderboard`
-- **Progression:** `swimmer_progression`, `biggest_improvers`, `cross_era_best`
+- **Progression:** `swimmer_progression`, `biggest_improvers`, `cross_era_best`,
+  `swimmer_meets` (which meets a `swimmer_id` competed in, per category),
+  `medal_count` (gold/silver/bronze finals finishes per swimmer, per category)
 - **Aggregates:** `club_leaderboard`, `age_group_ranking`, `meet_summary`
 - **Pacing:** `pacing`
 - **Field evolution:** `event_standard_by_season`, `final_cutline_by_season`,

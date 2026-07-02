@@ -75,6 +75,30 @@ def test_cutline_at_macro_exposes_entrants_count():
     assert row == (10,)
 
 
+def test_swimmer_meets_lists_participation():
+    con = _con(obt=_heats(10, 2024, 15000), meets=MEETS)
+    rows = con.execute(
+        "SELECT category, meet_id, swims FROM swimmer_meets "
+        "WHERE swimmer_id='s0'").fetchall()
+    assert rows == [("DM-L", "m1", 1)]
+
+
+def test_medal_count_tallies_finals_podium_only():
+    obt = [
+        dict(result_id="r1", swimmer_id="s1", rank=1, type="Final",
+             completed_centiseconds=15000, meet_id="m1", season=2024,
+             birth_year=2005, **EVENT),
+        dict(result_id="r2", swimmer_id="s1", rank=1, type="Heats",
+             completed_centiseconds=15100, meet_id="m1", season=2024,
+             birth_year=2005, **EVENT),  # heat win must NOT count as a medal
+    ]
+    con = _con(obt=obt, meets=MEETS)
+    row = con.execute(
+        "SELECT gold, silver, bronze, medals FROM medal_count "
+        "WHERE swimmer_id='s1' AND category='DM-L'").fetchone()
+    assert row == (1, 0, 0, 1)
+
+
 def test_event_standard_by_season_best_and_count():
     con = _con(obt=_heats(10, 2024, 15000), meets=MEETS)
     row = con.execute(

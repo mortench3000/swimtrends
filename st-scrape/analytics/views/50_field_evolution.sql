@@ -8,6 +8,31 @@ FROM individual_results r
 JOIN cur_dim_meet m USING (meet_id)
 CROSS JOIN UNNEST(m.category) AS cat(category);
 
+-- Which meets a swimmer has competed in, per championship category. One row
+-- per (swimmer, category, meet); `swims` is how many individual races there.
+-- e.g. SELECT * FROM swimmer_meets WHERE swimmer_id='26884' AND category='DM-L'.
+CREATE OR REPLACE VIEW swimmer_meets AS
+SELECT
+    swimmer_id, any_value(name) AS name,
+    category, meet_id, meet_name, season, meet_date,
+    count(*) AS swims
+FROM results_by_category
+GROUP BY swimmer_id, category, meet_id, meet_name, season, meet_date;
+
+-- Podium finishes per swimmer, per championship category. Finals only (a heat
+-- win is not a medal); rank 1/2/3 = gold/silver/bronze. Timed finals count as
+-- finals. e.g. SELECT * FROM medal_count WHERE swimmer_id='26884'.
+CREATE OR REPLACE VIEW medal_count AS
+SELECT
+    swimmer_id, any_value(name) AS name, category,
+    count(*) FILTER (WHERE rank = 1) AS gold,
+    count(*) FILTER (WHERE rank = 2) AS silver,
+    count(*) FILTER (WHERE rank = 3) AS bronze,
+    count(*)                         AS medals
+FROM results_by_category
+WHERE phase IN ('final', 'timed_final') AND rank IN (1, 2, 3)
+GROUP BY swimmer_id, category;
+
 -- How an event's standard moves across seasons, per championship category.
 CREATE OR REPLACE VIEW event_standard_by_season AS
 SELECT
