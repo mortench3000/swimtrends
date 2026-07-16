@@ -1,6 +1,9 @@
 db/
 logs/
 tests/
+notebooks/
+requirements-notebook.txt
+*.ipynb
 __pycache__/
 *.pyc
 *.pdf

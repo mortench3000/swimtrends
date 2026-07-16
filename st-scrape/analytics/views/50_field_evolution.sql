@@ -8,6 +8,31 @@ FROM individual_results r
 JOIN cur_dim_meet m USING (meet_id)
 CROSS JOIN UNNEST(m.category) AS cat(category);
 
+-- Which meets a swimmer has competed in, per championship category. One row
+-- per (swimmer, category, meet); `swims` is how many individual races there.
+-- e.g. SELECT * FROM swimmer_meets WHERE swimmer_id='26884' AND category='DM-L'.
+CREATE OR REPLACE VIEW swimmer_meets AS
+SELECT
+    swimmer_id, any_value(name) AS name,
+    category, meet_id, meet_name, season, meet_date,
+    count(*) AS swims
+FROM results_by_category
+GROUP BY swimmer_id, category, meet_id, meet_name, season, meet_date;
+
+-- Podium finishes per swimmer, per championship category. Finals only (a heat
+-- win is not a medal); rank 1/2/3 = gold/silver/bronze. Timed finals count as
+-- finals. e.g. SELECT * FROM medal_count WHERE swimmer_id='26884'.
+CREATE OR REPLACE VIEW medal_count AS
+SELECT
+    swimmer_id, any_value(name) AS name, category,
+    count(*) FILTER (WHERE rank = 1) AS gold,
+    count(*) FILTER (WHERE rank = 2) AS silver,
+    count(*) FILTER (WHERE rank = 3) AS bronze,
+    count(*)                         AS medals
+FROM results_by_category
+WHERE phase IN ('final', 'timed_final') AND rank IN (1, 2, 3)
+GROUP BY swimmer_id, category;
+
 -- How an event's standard moves across seasons, per championship category.
 CREATE OR REPLACE VIEW event_standard_by_season AS
 SELECT
@@ -17,6 +42,7 @@ SELECT
     quantile_cont(completed_centiseconds, 0.5)     AS median_cs,
     quantile_cont(completed_centiseconds, 0.25)    AS p25_cs,
     quantile_cont(completed_centiseconds, 0.75)    AS p75_cs,
+    avg(completed_centiseconds) FILTER (WHERE time_rank <= 3) AS top3_avg_cs,
     avg(completed_centiseconds) FILTER (WHERE time_rank <= 8) AS top8_avg_cs
 FROM (
     SELECT *,
@@ -30,6 +56,9 @@ FROM (
 GROUP BY category, season, course, gender, distance, stroke;
 
 -- Preliminary swims ranked by time within championship/event/season.
+-- `entrants` is the size of the prelim field, so a cut-line consumer can tell
+-- whether rank N is well-defined (entrants >= N) or the event was too small /
+-- swum as a timed final with no heats at all (then it is absent here entirely).
 CREATE OR REPLACE VIEW prelim_ranked AS
 SELECT
     category, season, course, gender, distance, stroke,
@@ -37,7 +66,10 @@ SELECT
     row_number() OVER (
         PARTITION BY category, season, course, gender, distance, stroke
         ORDER BY completed_centiseconds
-    ) AS heat_rank
+    ) AS heat_rank,
+    count(*) OVER (
+        PARTITION BY category, season, course, gender, distance, stroke
+    ) AS entrants
 FROM results_by_category
 WHERE phase = 'heats' AND completed_centiseconds IS NOT NULL;
 
@@ -45,6 +77,7 @@ WHERE phase = 'heats' AND completed_centiseconds IS NOT NULL;
 CREATE OR REPLACE VIEW final_cutline_by_season AS
 SELECT
     category, season, course, gender, distance, stroke,
+    entrants,
     completed_centiseconds AS cutline_centiseconds,
     completed_time         AS cutline_time,
     swimmer_id, name
@@ -55,6 +88,7 @@ WHERE heat_rank = 8;
 CREATE OR REPLACE MACRO cutline_at(n) AS TABLE
 SELECT
     category, season, course, gender, distance, stroke,
+    entrants,
     completed_centiseconds AS cutline_centiseconds,
     completed_time         AS cutline_time,
     swimmer_id, name

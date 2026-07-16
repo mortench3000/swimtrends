@@ -30,14 +30,40 @@ con = loader.connect()
 con.sql("SELECT * FROM event_standard_by_season WHERE category='DM-L'")
 ```
 
+### Jupyter in VS Code
+A ready-to-run starter notebook lives at `st-scrape/notebooks/explore.ipynb`
+(coverage overview, best times, the final cut-line trend, and event-standard
+plots — all using the real view columns).
+
+One-time setup:
+1. Install the analyst tooling into the venv:
+   `cd st-scrape && .venv/bin/pip install -r requirements-notebook.txt`
+   (adds `ipykernel`, `pandas`, `matplotlib`).
+2. Register the venv as a Jupyter kernel (so VS Code lists it by name):
+   `.venv/bin/python -m ipykernel install --user --name swimtrends --display-name "Swimtrends (st-scrape)"`
+3. Install the VS Code **Python** + **Jupyter** extensions if you haven't.
+
+Then open `explore.ipynb` and pick the **Swimtrends (st-scrape)** kernel
+(top-right). The workspace `.vscode/settings.json` points the default
+interpreter at `st-scrape/.venv` and sets the notebook working dir to
+`st-scrape/`. The notebook's first cell also self-locates the `analytics`
+package, so it runs even if launched from elsewhere. `con.sql(...)` returns a
+DuckDB result; the `q(...)` helper returns a pandas DataFrame for tables/plots.
+
 ## View catalog
 - **Best times / ranking:** `personal_best`, `season_best`, `event_leaderboard`
-- **Progression:** `swimmer_progression`, `biggest_improvers`, `cross_era_best`
+- **Progression:** `swimmer_progression`, `biggest_improvers`, `cross_era_best`,
+  `swimmer_meets` (which meets a `swimmer_id` competed in, per category),
+  `medal_count` (gold/silver/bronze finals finishes per swimmer, per category)
 - **Aggregates:** `club_leaderboard`, `age_group_ranking`, `meet_summary`
 - **Pacing:** `pacing`
 - **Field evolution:** `event_standard_by_season`, `final_cutline_by_season`,
   `cutline_at(n)` (cut-line for an arbitrary final size), `results_by_category`,
-  `prelim_ranked`
+  `prelim_ranked`. `final_cutline_by_season` / `cutline_at(n)` expose an
+  `entrants` column (the prelim field size) so you can tell a well-defined
+  cut-line (`entrants >= n`) from a thin field. An event swum as a *timed final*
+  (no heats — common for small fields) has no prelim, so it is **absent** from
+  these views entirely; use `event_standard_by_season` for an unbroken trend.
 
 Base views: `results` (1 row per result, with `age`/`phase`/`is_relay`/`is_dq`)
 and `individual_results` (real individual swims only).

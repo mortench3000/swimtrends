@@ -577,6 +577,111 @@ def _results_search_keyword(expected_race_type):
     return 'indledende'  # 'Heats'/preliminary is the default
 
 
+def parse_results_table(tbody, *, is_relay, race_id_for_results, results_page_url,
+                        scrape_splits=scrape_split_times):
+    """Parse a results <tbody> into result-row dicts (pure; split fetches injected).
+
+    A normal row has 6 cells [#, Navn, Årgang, Klub, Tid, Reaktionstid]. A
+    disqualified swim renders with 7 cells: the rank cell is '-' and the DSQ
+    marker sits in the *time* cell ('DSQ'), with a trailing empty cell. We accept
+    any row with >= 6 cells (all data lives in cells[0..4]) and map a non-numeric
+    rank to -1, so DSQ/DNS swims are captured (rank -1, no time) instead of
+    being silently dropped. Curate's scoring already excludes rank == -1.
+    """
+    results = []
+    for row in tbody.find_all('tr'):
+        cells = row.find_all('td')
+        if len(cells) < 6:  # rank, name, year, club, time, reaction (DSQ adds a 7th)
+            continue
+        try:
+            # Rank: an integer, or -1 for any non-placing marker ('-', 'DSQ', ...).
+            rank_str = cells[0].get_text(strip=True)
+            try:
+                rank_val = int(rank_str)
+            except ValueError:
+                rank_val = -1
+                print(f"    Info: non-numeric rank '{rank_str}' mapped to -1 (disqualification/no-show).", file=sys.stderr)
+
+            name_tag = cells[1].find('a')
+            name_val = name_tag.get_text(strip=True) if name_tag else cells[1].get_text(strip=True)
+            # Swimmer ID extraction - individual events only. For relays the name
+            # cell holds the team, and its link is the split-times page (not a
+            # swimmer profile), so there is no swimmer id.
+            swimmer_id_val = None
+            if not is_relay:
+                swimmer_id_href = name_tag['href'] if name_tag and name_tag.has_attr('href') else None
+                if swimmer_id_href and '?' in swimmer_id_href:
+                    swimmer_id_val = swimmer_id_href.split('?')[-1]
+                elif swimmer_id_href:
+                    print(f"    Warning: Swimmer href '{swimmer_id_href}' does not contain '?' for ID extraction.", file=sys.stderr)
+
+            # Birth year
+            birth_year_str = cells[2].get_text(strip=True)
+            birth_year_val = None
+            try:
+                birth_year_val = int(birth_year_str)
+            except ValueError:
+                print(f"    Warning: Could not convert birth year '{birth_year_str}' to int.", file=sys.stderr)
+
+            # Nationality (from flag image) and club text
+            club_cell = cells[3]
+            flag_img = club_cell.find('img')
+            nationality_val = None
+            club_val = None
+            if flag_img and flag_img.has_attr('src'):
+                filename = os.path.basename(flag_img['src'])
+                nationality_val = os.path.splitext(filename)[0]
+                club_text_node = flag_img.next_sibling
+                if club_text_node and isinstance(club_text_node, str):
+                    club_val = club_text_node.strip()
+                else:  # Fallback if text isn't immediately after img
+                    club_val = club_cell.get_text(strip=True)
+                    print(f"    Warning: Could not find club text directly after flag for {name_val}. Using full cell text.", file=sys.stderr)
+            else:  # No flag image found
+                nationality_val = 'UNK'
+                club_val = club_cell.get_text(strip=True)
+                print(f"    Warning: No flag image found for {name_val}. Setting nationality to {nationality_val}.", file=sys.stderr)
+
+            # Time (literal 'DSQ'/'DNS' for a disqualification -> not a parseable time)
+            time_tag = cells[4].find('a')
+            completed_time_val = time_tag.get_text(strip=True) if time_tag else cells[4].get_text(strip=True)
+            # The split-times page is linked from the time cell (individual) or the
+            # team-name cell (relay); locate it by its 'splittider' href so both
+            # layouts work, then scrape the laps.
+            split_times = []
+            split_anchor = next(
+                (a for c in cells
+                 for a in [c.find('a')]
+                 if a and a.has_attr('href') and 'splittider' in a['href']),
+                None)
+            if split_anchor:
+                split_url = urljoin(results_page_url, split_anchor['href'])
+                split_times = scrape_splits(split_url)
+
+            race_id_int = None
+            if race_id_for_results is not None:
+                try:
+                    race_id_int = int(race_id_for_results)
+                except ValueError:
+                    print(f"    Warning: Could not convert race_id_for_results '{race_id_for_results}' to int.", file=sys.stderr)
+
+            results.append({
+                'race_id': race_id_int,
+                'Rank': rank_val,       # int, or -1 for DSQ/no-show
+                'Name': name_val,
+                'Swimmer_id': swimmer_id_val,
+                'nationality': nationality_val.upper(),
+                'club': club_val,
+                'birth_year': birth_year_val,
+                'completed_time': completed_time_val,   # e.g. "1:02.48" or "DSQ"
+                'completed_centiseconds': time_to_centiseconds(completed_time_val),  # None for DSQ
+                'splits': split_times
+            })
+        except Exception as e:
+            print(f"    Error processing result row: {row}. Error: {e}", file=sys.stderr)
+    return results
+
+
 def scrape_race_results(race_url, expected_race_type, race_id_for_results, is_relay=False): # Added race_id, relay flag
     """
     Scrapes the result rows from a specific race results page.
@@ -668,113 +773,9 @@ def scrape_race_results(race_url, expected_race_type, race_id_for_results, is_re
              print(f"    Warning: Found table but no tbody on page {race_url}", file=sys.stderr)
              return results
 
-        rows = tbody.find_all('tr')
-        for row in rows:
-            cells = row.find_all('td')
-            if len(cells) == 6: # Rank, Name, Year, Club/Flag, Time, Reaction
-                try:
-                    # Convert Rank to int
-                    rank_str = cells[0].get_text(strip=True)
-                    rank_val = None
-                    try:
-                        rank_val = int(rank_str)
-                    except ValueError:
-                        if rank_str.upper() == 'DSQ':
-                            rank_val = -1 # Assign -1 for DSQ
-                            print(f"    Info: Rank '{rank_str}' mapped to -1.", file=sys.stderr)
-                        else:
-                            # Keep None if it's not DSQ and not an integer
-                            print(f"    Warning: Could not convert non-DSQ rank '{rank_str}' to int. Storing as None.", file=sys.stderr)
-                            rank_val = None
-
-                    name_tag = cells[1].find('a')
-                    name_val = name_tag.get_text(strip=True) if name_tag else cells[1].get_text(strip=True)
-                    # Swimmer ID extraction - individual events only. For relays
-                    # the name cell holds the team, and its link is the split-times
-                    # page (not a swimmer profile), so there is no swimmer id.
-                    swimmer_id_val = None
-                    if not is_relay:
-                        swimmer_id_href = name_tag['href'] if name_tag and name_tag.has_attr('href') else None
-                        if swimmer_id_href and '?' in swimmer_id_href:
-                            try:
-                                swimmer_id_val = swimmer_id_href.split('?')[-1]
-                            except IndexError:
-                                print(f"    Warning: Could not split swimmer href '{swimmer_id_href}' to get ID.", file=sys.stderr)
-                        elif swimmer_id_href:
-                             print(f"    Warning: Swimmer href '{swimmer_id_href}' does not contain '?' for ID extraction.", file=sys.stderr)
-
-                    # Convert Birth Year to int
-                    birth_year_str = cells[2].get_text(strip=True)
-                    birth_year_val = None
-                    try:
-                        birth_year_val = int(birth_year_str)
-                    except ValueError:
-                        print(f"    Warning: Could not convert birth year '{birth_year_str}' to int.", file=sys.stderr)
-
-
-                    # Nationality and Club extraction
-                    club_cell = cells[3]
-                    flag_img = club_cell.find('img')
-                    nationality_val = None
-                    club_val = None
-                    if flag_img and flag_img.has_attr('src'):
-                        img_src = flag_img['src']
-                        # Extract filename, remove extension for nationality
-                        filename = os.path.basename(img_src)
-                        nationality_val = os.path.splitext(filename)[0]
-                        # Get text after the image tag for club
-                        club_text_node = flag_img.next_sibling
-                        if club_text_node and isinstance(club_text_node, str):
-                             club_val = club_text_node.strip()
-                        else: # Fallback if text isn't immediately after img
-                             club_val = club_cell.get_text(strip=True) # Might include flag text if logic fails
-                             print(f"    Warning: Could not find club text directly after flag for {name_val}. Using full cell text.", file=sys.stderr)
-
-                    else: # No flag image found
-                        nationality_val = 'UNK' # Or None, depending on preference
-                        club_val = club_cell.get_text(strip=True)
-                        print(f"    Warning: No flag image found for {name_val}. Setting nationality to {nationality_val}.", file=sys.stderr)
-
-
-                    time_tag = cells[4].find('a')
-                    completed_time_val = time_tag.get_text(strip=True) if time_tag else cells[4].get_text(strip=True)
-                    # The split-times page is linked from the time cell (individual)
-                    # or the team-name cell (relay); locate it by its 'splittider'
-                    # href so both layouts work, then scrape the laps.
-                    split_times = []
-                    split_anchor = next(
-                        (a for c in cells
-                         for a in [c.find('a')]
-                         if a and a.has_attr('href') and 'splittider' in a['href']),
-                        None)
-                    if split_anchor:
-                        split_url = urljoin(results_page_url, split_anchor['href'])
-                        split_times = scrape_split_times(split_url)
-                    # reaction_time_val = cells[5].get_text(strip=True) # No longer needed
-
-                    # Convert race_id_for_results to int (should already be int/None from race list)
-                    race_id_int = None
-                    if race_id_for_results is not None:
-                        try:
-                            race_id_int = int(race_id_for_results)
-                        except ValueError:
-                             print(f"    Warning: Could not convert race_id_for_results '{race_id_for_results}' to int.", file=sys.stderr)
-
-
-                    results.append({
-                        'race_id': race_id_int, # Use int version
-                        'Rank': rank_val,       # Now int (-1 for DSQ) or None
-                        'Name': name_val,
-                        'Swimmer_id': swimmer_id_val, # String ID is fine
-                        'nationality': nationality_val.upper(),
-                        'club': club_val,
-                        'birth_year': birth_year_val, # Already int or None
-                        'completed_time': completed_time_val, # Original string, e.g. "1:02.48"
-                        'completed_centiseconds': time_to_centiseconds(completed_time_val), # Int hundredths, or None
-                        'splits': split_times # Per-lap split times (empty for single-length races)
-                    })
-                except Exception as e:
-                    print(f"    Error processing result row: {row}. Error: {e}", file=sys.stderr)
+        results = parse_results_table(
+            tbody, is_relay=is_relay, race_id_for_results=race_id_for_results,
+            results_page_url=results_page_url)
 
     except requests.exceptions.RequestException as e:
         print(f"    Error fetching results URL {race_url}: {e}", file=sys.stderr)
