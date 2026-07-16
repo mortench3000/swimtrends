@@ -57,6 +57,16 @@ DuckDB result; the `q(...)` helper returns a pandas DataFrame for tables/plots.
   `medal_count` (gold/silver/bronze finals finishes per swimmer, per category)
 - **Aggregates:** `club_leaderboard`, `age_group_ranking`, `meet_summary`
 - **Pacing:** `pacing`
+- **Juniors:** `junior_championship` (junior title standings per DMJ-L event).
+  A swim is junior when competition-season age is 16-18 (`is_junior` on
+  `results`, a floor *and* a ceiling — sub-16 qualifiers at a senior meet are
+  too young for the title; the band slides by season, e.g. 2026 → born
+  2008-2010). The title is decided from the **qualifying** swim, so
+  `junior_championship` ranks juniors by their heats (or timed-final, for
+  800/1500) time — never the senior final, which most juniors never reach.
+  `junior_rank` 1/2/3 = gold/silver/bronze. e.g. `SELECT * FROM
+  junior_championship WHERE season=2026 AND distance=100 AND stroke='Fly'
+  AND gender='M' ORDER BY junior_rank`.
 - **Field evolution:** `event_standard_by_season`, `final_cutline_by_season`,
   `cutline_at(n)` (cut-line for an arbitrary final size), `results_by_category`,
   `prelim_ranked`. `final_cutline_by_season` / `cutline_at(n)` expose an
@@ -65,8 +75,9 @@ DuckDB result; the `q(...)` helper returns a pandas DataFrame for tables/plots.
   (no heats — common for small fields) has no prelim, so it is **absent** from
   these views entirely; use `event_standard_by_season` for an unbroken trend.
 
-Base views: `results` (1 row per result, with `age`/`phase`/`is_relay`/`is_dq`)
-and `individual_results` (real individual swims only).
+Base views: `results` (1 row per result, with
+`age`/`is_junior`/`phase`/`is_relay`/`is_dq`) and `individual_results` (real
+individual swims only).
 
 ## Vocabulary (curated column values)
 - **stroke** is Danish: `Fri` (free), `Ryg` (back), `Bryst` (breast), `Fly`,
