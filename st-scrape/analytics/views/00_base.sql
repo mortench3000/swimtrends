@@ -5,6 +5,10 @@ CREATE OR REPLACE VIEW results AS
 SELECT
     o.*,
     o.season - o.birth_year AS age,
+    -- Junior championship band: competition-season age 16-18 (a floor AND a
+    -- ceiling; sub-16 swimmers at a senior meet are too young for the junior
+    -- title). Sliding by season, e.g. 2026 -> birth years 2008-2010.
+    (o.season - o.birth_year) BETWEEN 16 AND 18 AS is_junior,
     o.relay_count > 1       AS is_relay,
     o.rank = -1             AS is_dq,
     CASE o.type
