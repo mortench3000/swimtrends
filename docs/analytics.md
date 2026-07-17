@@ -23,6 +23,18 @@ swimtrends query --sql "SELECT season, gender, cutline_time FROM final_cutline_b
   WHERE category='DM-L' AND distance=200 AND stroke='Bryst' ORDER BY season, gender"
 ```
 
+## Data overview (what's in the zone)
+Top-level, read-only catalog queries — no SQL needed:
+```bash
+swimtrends summary                       # totals: meets, results, swimmers, seasons, categories
+swimtrends categories                    # per-category coverage: meets, season span, results
+swimtrends meets                         # every meet, sorted by season, with race/result/DSQ counts
+swimtrends meets --category DM-K         # filter by category
+swimtrends meets --season 2026           # filter by season (filters compose)
+```
+`races` = distinct races, `results` = result rows, `dsq` = disqualifications
+(rank -1). Like `query`, these need only AWS credentials for S3.
+
 ## From a notebook / Python
 ```python
 from analytics import loader
