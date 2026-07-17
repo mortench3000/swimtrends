@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Grep",
+      "Glob",
+
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git ls-files:*)",
+      "Bash(git grep:*)",
+
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+
+      "Bash(.venv/bin/python -m pytest:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+
+      "Bash(.venv/bin/python -m ingestion.cli query:*)",
+      "Bash(.venv/bin/python -m ingestion.cli meets:*)",
+      "Bash(.venv/bin/python -m ingestion.cli categories:*)",
+      "Bash(.venv/bin/python -m ingestion.cli summary:*)",
+      "Bash(.venv/bin/python -m ingestion.cli pending:*)",
+
+      "Bash(aws s3 ls:*)",
+      "Bash(aws sts get-caller-identity:*)",
+      "Bash(aws dynamodb list-tables:*)",
+      "Bash(aws dynamodb describe-table:*)",
+      "Bash(aws dynamodb get-item:*)",
+      "Bash(aws dynamodb scan:*)",
+      "Bash(aws ecs list-clusters:*)",
+      "Bash(aws ecs list-tasks:*)",
+      "Bash(aws ecs list-task-definitions:*)",
+      "Bash(aws ecs describe-tasks:*)",
+      "Bash(aws ecs describe-task-definition:*)",
+      "Bash(aws cloudformation list-stacks:*)",
+      "Bash(aws cloudformation describe-stacks:*)",
+      "Bash(aws cloudformation describe-stack-resources:*)",
+      "Bash(aws sns list-topics:*)",
+      "Bash(aws sns list-subscriptions-by-topic:*)"
+    ]
+  }
+}
