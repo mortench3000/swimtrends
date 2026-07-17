@@ -479,7 +479,7 @@ for block in BLOCKS:
 # 6 non-standard relay_count=10 rows), and validate each by recomputing seconds.
 import csv
 
-CSV_PATH = os.path.join(SCRIPT_DIR, '..', 'pgdckr', 'data', 'Points_Table_Base_Times.csv')
+CSV_PATH = os.path.join(SCRIPT_DIR, '..', 'legacy', 'pgdckr', 'data', 'Points_Table_Base_Times.csv')
 existing_keys = {(r['season'], r['course'], r['gender'], r['relay_count'], r['distance'], r['stroke'])
                  for r in records}
 legacy = 0
