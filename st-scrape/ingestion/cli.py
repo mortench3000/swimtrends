@@ -6,6 +6,13 @@
   swimtrends dispatch                      # normal due-check cycle
   swimtrends dispatch <meet_id> [--force]  # one meet now (force skips gates)
   swimtrends dispatch --all --force        # backfill every scheduled meet now
+  swimtrends pending                       # meets registered but not yet scraped
+
+Read-only curated-zone queries (need only AWS creds, not the ingestion env):
+  swimtrends query [--sql "…"]             # DuckDB session / one-shot SQL
+  swimtrends meets [--category DM-K] [--season 2026]  # meets by season + counts
+  swimtrends categories                    # per-category coverage
+  swimtrends summary                       # top-level totals
 
 register talks to DynamoDB directly; dispatch invokes the dispatcher Lambda.
 """
@@ -58,7 +65,22 @@ def build_parser():
     qry.add_argument("--sql", default=None,
                      help="Run a single SQL statement and print the result, then exit.")
 
+    mts = sub.add_parser("meets", help="List curated meets (newest season first) with race/result counts.")
+    mts.add_argument("--category", default=None, help="Filter to one category, e.g. DM-K.")
+    mts.add_argument("--season", type=int, default=None, help="Filter to one season year.")
+    mts.add_argument("--asc", action="store_true", help="Sort seasons ascending (oldest first).")
+
+    sub.add_parser("categories", help="Per-category coverage: meets, season span, result totals.")
+    sub.add_parser("summary", help="Top-level totals for the whole curated zone.")
+
+    sub.add_parser("pending", help="List registered meets awaiting (re)scrape (status scheduled|failed).")
+
     return parser
+
+
+# Read-only analytics commands: need only S3 credentials (via connect), not the
+# ingestion/curate env wiring. main() short-circuits these before requiring it.
+READONLY_COMMANDS = frozenset({"query", "meets", "categories", "summary"})
 
 
 def _default_query_connect():
@@ -128,6 +150,20 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
                   f"-> {args.klass}")
         return
 
+    if args.command == "pending":
+        from analytics.overview import render_table
+        meets = sorted(registry.scheduled_meets(),
+                       key=lambda m: (m.get("status", ""), m["meet_id"]))
+        if not meets:
+            print("No pending scrapes.")
+            return 0
+        print(render_table(
+            ["meet", "status", "attempts", "category", "end_date", "error"],
+            [[m["meet_id"], m.get("status", ""), m.get("attempts", 0),
+              m.get("category", []), m.get("end_date", ""),
+              (m.get("last_error") or "")[:50]] for m in meets]))
+        return 0
+
     if args.command == "query":
         con = (connect or _default_query_connect)()
         if args.sql:
@@ -142,6 +178,41 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
         code.interact(banner=banner, local={"con": con, "sql": lambda q: print(con.sql(q))})
         return 0
 
+    if args.command in ("meets", "categories", "summary"):
+        from analytics import overview
+        con = (connect or _default_query_connect)()
+
+        if args.command == "meets":
+            rows = overview.list_meets(con, category=args.category, season=args.season,
+                                       ascending=args.asc)
+            if not rows:
+                print("No meets match.")
+                return 0
+            print(overview.render_table(
+                ["season", "meet", "course", "date", "races", "results", "dsq",
+                 "categories", "venue", "name"],
+                [[r["season"], r["meet_id"], r["course"], r["meet_date"], r["races"],
+                  r["results"], r["dsq"], r["categories"], r["venue"], r["meet_name"]]
+                 for r in rows]))
+            return 0
+
+        if args.command == "categories":
+            rows = overview.list_categories(con)
+            print(overview.render_table(
+                ["category", "meets", "seasons", "results"],
+                [[r["category"], r["meets"], f"{r['season_min']}-{r['season_max']}",
+                  r["results"]] for r in rows]))
+            return 0
+
+        s = overview.summary(con)
+        span = f"{s['season_min']}-{s['season_max']}" if s["meets"] else "-"
+        print(f"meets:      {s['meets']}")
+        print(f"results:    {s['results']}")
+        print(f"swimmers:   {s['swimmers']}")
+        print(f"seasons:    {span}")
+        print(f"categories: {', '.join(s['categories']) or '-'}")
+        return 0
+
 
 def main():
     argv = sys.argv[1:]
@@ -149,7 +220,7 @@ def main():
     # `query` is a local, read-only analytics session — it needs only AWS creds
     # for S3, not the ingestion/curate wiring or its env vars. Short-circuit
     # before touching REGISTRY_TABLE/DISPATCHER_FUNCTION so an analyst can run it.
-    if build_parser().parse_args(argv).command == "query":
+    if build_parser().parse_args(argv).command in READONLY_COMMANDS:
         run(argv, registry=None, invoke=None)
         return
 

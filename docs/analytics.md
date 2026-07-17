@@ -1,6 +1,8 @@
 # Analytics (Spec 3): local DuckDB over the curated zone
 
-Read-only ad-hoc analysis of the curated Parquet, straight from S3.
+Read-only ad-hoc analysis of the curated Parquet, straight from S3. For the
+operational side — registering meets, triggering scrapes/curation, class
+overrides, `pending` — see [ingestion.md](ingestion.md).
 
 ## Prerequisites
 - `pip install -r st-scrape/requirements.txt` (provides `duckdb`).
@@ -22,6 +24,44 @@ per season):
 swimtrends query --sql "SELECT season, gender, cutline_time FROM final_cutline_by_season \
   WHERE category='DM-L' AND distance=200 AND stroke='Bryst' ORDER BY season, gender"
 ```
+
+### More example queries
+```bash
+# Junior championship top 5 — 100m Fly women, 2026 (ranked on the qualifying swim)
+swimtrends query --sql "SELECT junior_rank, name, completed_time FROM junior_championship \
+  WHERE season=2026 AND distance=100 AND stroke='Fly' AND gender='F' ORDER BY junior_rank LIMIT 5"
+
+# One swimmer's medals across every championship
+swimtrends query --sql "SELECT category, gold, silver, bronze FROM medal_count \
+  WHERE swimmer_id='26884' ORDER BY gold DESC"
+
+# Which DM-L meets a swimmer has competed in
+swimtrends query --sql "SELECT season, meet_name, swims FROM swimmer_meets \
+  WHERE swimmer_id='26884' AND category='DM-L' ORDER BY season"
+
+# All-time 100m Freestyle (SCM) top 10 by best time, with WA points
+swimtrends query --sql "SELECT name, best_time, points FROM personal_best \
+  WHERE stroke='Fri' AND distance=100 AND course='SCM' ORDER BY best_centiseconds LIMIT 10"
+
+# How an event standard moved across seasons (best + top-3-avg + top-8-avg, centiseconds)
+swimtrends query --sql "SELECT season, gender, best_cs, top3_avg_cs, top8_avg_cs \
+  FROM event_standard_by_season WHERE category='DM-L' AND distance=100 AND stroke='Fly' ORDER BY season, gender"
+```
+Column values are Danish: stroke `Fri`/`Ryg`/`Bryst`/`Fly`/`IM`, course `LCM`/`SCM`,
+gender `M`/`F` (see Vocabulary below). SCM seasons are the *next* year — a
+December 2025 meet is season 2026.
+
+## Data overview (what's in the zone)
+Top-level, read-only catalog queries — no SQL needed:
+```bash
+swimtrends summary                       # totals: meets, results, swimmers, seasons, categories
+swimtrends categories                    # per-category coverage: meets, season span, results
+swimtrends meets                         # every meet, sorted by season, with race/result/DSQ counts
+swimtrends meets --category DM-K         # filter by category
+swimtrends meets --season 2026           # filter by season (filters compose)
+```
+`races` = distinct races, `results` = result rows, `dsq` = disqualifications
+(rank -1). Like `query`, these need only AWS credentials for S3.
 
 ## From a notebook / Python
 ```python
