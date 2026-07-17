@@ -1,6 +1,8 @@
 # Analytics (Spec 3): local DuckDB over the curated zone
 
-Read-only ad-hoc analysis of the curated Parquet, straight from S3.
+Read-only ad-hoc analysis of the curated Parquet, straight from S3. For the
+operational side — registering meets, triggering scrapes/curation, class
+overrides, `pending` — see [ingestion.md](ingestion.md).
 
 ## Prerequisites
 - `pip install -r st-scrape/requirements.txt` (provides `duckdb`).
