@@ -23,6 +23,32 @@ swimtrends query --sql "SELECT season, gender, cutline_time FROM final_cutline_b
   WHERE category='DM-L' AND distance=200 AND stroke='Bryst' ORDER BY season, gender"
 ```
 
+### More example queries
+```bash
+# Junior championship top 5 — 100m Fly women, 2026 (ranked on the qualifying swim)
+swimtrends query --sql "SELECT junior_rank, name, completed_time FROM junior_championship \
+  WHERE season=2026 AND distance=100 AND stroke='Fly' AND gender='F' ORDER BY junior_rank LIMIT 5"
+
+# One swimmer's medals across every championship
+swimtrends query --sql "SELECT category, gold, silver, bronze FROM medal_count \
+  WHERE swimmer_id='26884' ORDER BY gold DESC"
+
+# Which DM-L meets a swimmer has competed in
+swimtrends query --sql "SELECT season, meet_name, swims FROM swimmer_meets \
+  WHERE swimmer_id='26884' AND category='DM-L' ORDER BY season"
+
+# All-time 100m Freestyle (SCM) top 10 by best time, with WA points
+swimtrends query --sql "SELECT name, best_time, points FROM personal_best \
+  WHERE stroke='Fri' AND distance=100 AND course='SCM' ORDER BY best_centiseconds LIMIT 10"
+
+# How an event standard moved across seasons (best + top-3-avg + top-8-avg, centiseconds)
+swimtrends query --sql "SELECT season, gender, best_cs, top3_avg_cs, top8_avg_cs \
+  FROM event_standard_by_season WHERE category='DM-L' AND distance=100 AND stroke='Fly' ORDER BY season, gender"
+```
+Column values are Danish: stroke `Fri`/`Ryg`/`Bryst`/`Fly`/`IM`, course `LCM`/`SCM`,
+gender `M`/`F` (see Vocabulary below). SCM seasons are the *next* year — a
+December 2025 meet is season 2026.
+
 ## Data overview (what's in the zone)
 Top-level, read-only catalog queries — no SQL needed:
 ```bash
