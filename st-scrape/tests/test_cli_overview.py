@@ -32,13 +32,21 @@ def _con():
     return con
 
 
-def test_meets_command_prints_table_sorted_by_season(capsys):
+def test_meets_command_prints_table(capsys):
     rc = cli.run(["meets"], registry=None, invoke=None, connect=_con)
     out = capsys.readouterr().out
     assert rc == 0
-    # header + both meets, season order (2021 line before 2024 line)
-    assert out.index("m2") < out.index("m1")
+    assert "m1" in out and "m2" in out
     assert "races" in out and "results" in out
+
+
+def test_meets_default_desc_and_asc_flag(capsys):
+    cli.run(["meets"], registry=None, invoke=None, connect=_con)
+    desc = capsys.readouterr().out
+    assert desc.index("m1") < desc.index("m2")            # 2024 before 2021 (newest first)
+    cli.run(["meets", "--asc"], registry=None, invoke=None, connect=_con)
+    asc = capsys.readouterr().out
+    assert asc.index("m2") < asc.index("m1")              # 2021 before 2024 (oldest first)
 
 
 def test_meets_category_filter(capsys):

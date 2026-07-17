@@ -64,9 +64,10 @@ def build_parser():
     qry.add_argument("--sql", default=None,
                      help="Run a single SQL statement and print the result, then exit.")
 
-    mts = sub.add_parser("meets", help="List curated meets (sorted by season) with race/result counts.")
+    mts = sub.add_parser("meets", help="List curated meets (newest season first) with race/result counts.")
     mts.add_argument("--category", default=None, help="Filter to one category, e.g. DM-K.")
     mts.add_argument("--season", type=int, default=None, help="Filter to one season year.")
+    mts.add_argument("--asc", action="store_true", help="Sort seasons ascending (oldest first).")
 
     sub.add_parser("categories", help="Per-category coverage: meets, season span, result totals.")
     sub.add_parser("summary", help="Top-level totals for the whole curated zone.")
@@ -165,7 +166,8 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
         con = (connect or _default_query_connect)()
 
         if args.command == "meets":
-            rows = overview.list_meets(con, category=args.category, season=args.season)
+            rows = overview.list_meets(con, category=args.category, season=args.season,
+                                       ascending=args.asc)
             if not rows:
                 print("No meets match.")
                 return 0

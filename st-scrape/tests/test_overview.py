@@ -44,9 +44,18 @@ def _con(meets=MEETS, obt=OBT):
     return con
 
 
-def test_list_meets_sorted_by_season_with_counts():
+def test_list_meets_sorted_by_season_descending_by_default():
     rows = overview.list_meets(_con())
-    assert [r["season"] for r in rows] == [2021, 2024]      # season order
+    assert [r["season"] for r in rows] == [2024, 2021]      # newest first
+
+
+def test_list_meets_ascending_option_reverses():
+    rows = overview.list_meets(_con(), ascending=True)
+    assert [r["season"] for r in rows] == [2021, 2024]      # oldest first
+
+
+def test_list_meets_counts():
+    rows = overview.list_meets(_con())
     m1 = next(r for r in rows if r["meet_id"] == "m1")
     assert (m1["races"], m1["results"], m1["dsq"]) == (2, 3, 1)
     assert m1["venue"] == "Bellahøj"

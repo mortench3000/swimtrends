@@ -7,15 +7,17 @@ render_table() formats them for the CLI.
 """
 
 
-def list_meets(con, *, category=None, season=None):
-    """One row per meet, sorted by season. races = distinct race_id,
-    results = result rows, dsq = rank -1. Optional category/season filters."""
+def list_meets(con, *, category=None, season=None, ascending=False):
+    """One row per meet, sorted by season (descending by default; ascending=True
+    for oldest-first). races = distinct race_id, results = result rows,
+    dsq = rank -1. Optional category/season filters."""
     where, params = [], []
     if category is not None:
         where.append("list_contains(m.category, ?)"); params.append(category)
     if season is not None:
         where.append("m.season = ?"); params.append(season)
     clause = ("WHERE " + " AND ".join(where)) if where else ""
+    direction = "ASC" if ascending else "DESC"
     rows = con.execute(f"""
         SELECT m.season, m.meet_id, m.course, m.meet_date, m.venue,
                list_sort(m.category) AS categories, m.meet_name,
@@ -26,7 +28,7 @@ def list_meets(con, *, category=None, season=None):
         LEFT JOIN cur_obt o USING (meet_id)
         {clause}
         GROUP BY m.season, m.meet_id, m.course, m.meet_date, m.venue, m.category, m.meet_name
-        ORDER BY m.season, m.meet_id
+        ORDER BY m.season {direction}, m.meet_id
     """, params).fetchall()
     cols = ["season", "meet_id", "course", "meet_date", "venue", "categories",
             "meet_name", "races", "results", "dsq"]
