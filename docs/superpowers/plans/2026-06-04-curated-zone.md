@@ -1705,7 +1705,7 @@ Run:
 cd swimtrends-app
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-cdk synth SwimtrendsCuratedStack --app ".venv/bin/python3 app.py" -c alert_email=mortench.privat@gmail.com >/dev/null
+cdk synth SwimtrendsCuratedStack --app ".venv/bin/python3 app.py" -c alert_email=<your-alert-email> >/dev/null
 ```
 Expected: synth succeeds (no exceptions), emits CloudFormation.
 
@@ -1744,7 +1744,7 @@ cd swimtrends-app
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
 cdk deploy SwimtrendsCuratedStack \
-  --app ".venv/bin/python3 app.py" -c alert_email=mortench.privat@gmail.com \
+  --app ".venv/bin/python3 app.py" -c alert_email=<your-alert-email> \
   --require-approval never --ci
 ```
 Expected: stack deploys (Docker must be running for the image asset).
