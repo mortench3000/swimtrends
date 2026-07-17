@@ -6,6 +6,7 @@
   swimtrends dispatch                      # normal due-check cycle
   swimtrends dispatch <meet_id> [--force]  # one meet now (force skips gates)
   swimtrends dispatch --all --force        # backfill every scheduled meet now
+  swimtrends pending                       # meets registered but not yet scraped
 
 Read-only curated-zone queries (need only AWS creds, not the ingestion env):
   swimtrends query [--sql "…"]             # DuckDB session / one-shot SQL
@@ -71,6 +72,8 @@ def build_parser():
 
     sub.add_parser("categories", help="Per-category coverage: meets, season span, result totals.")
     sub.add_parser("summary", help="Top-level totals for the whole curated zone.")
+
+    sub.add_parser("pending", help="List registered meets awaiting (re)scrape (status scheduled|failed).")
 
     return parser
 
@@ -146,6 +149,20 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
             print(f"Override set: meet {args.meet_id} race {args.race_id} "
                   f"-> {args.klass}")
         return
+
+    if args.command == "pending":
+        from analytics.overview import render_table
+        meets = sorted(registry.scheduled_meets(),
+                       key=lambda m: (m.get("status", ""), m["meet_id"]))
+        if not meets:
+            print("No pending scrapes.")
+            return 0
+        print(render_table(
+            ["meet", "status", "attempts", "category", "end_date", "error"],
+            [[m["meet_id"], m.get("status", ""), m.get("attempts", 0),
+              m.get("category", []), m.get("end_date", ""),
+              (m.get("last_error") or "")[:50]] for m in meets]))
+        return 0
 
     if args.command == "query":
         con = (connect or _default_query_connect)()

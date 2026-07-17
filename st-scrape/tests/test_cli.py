@@ -53,6 +53,26 @@ def test_rescrape_missing_meet_errors(dynamodb_table):
         cli.run(["register", "99999", "--rescrape"], registry=reg, invoke=None)
 
 
+def test_pending_lists_scheduled_and_failed_not_scraped(dynamodb_table, capsys):
+    reg = MeetRegistry(TABLE_NAME, region="eu-west-1")
+    reg.put_meet("100", ["DM-L"], "2024-07-11")            # scheduled -> pending
+    reg.put_meet("200", ["DO"], "2024-04-01")              # -> failed -> pending
+    reg.claim("200"); reg.mark_failed("200", "boom")
+    reg.put_meet("300", ["DM-K"], "2023-12-15")            # -> scraped -> NOT pending
+    reg.claim("300"); reg.mark_scraped("300", "N", 10, 5)
+    cli.run(["pending"], registry=reg, invoke=None)
+    out = capsys.readouterr().out
+    assert "100" in out and "200" in out
+    assert "300" not in out
+    assert "scheduled" in out and "failed" in out
+
+
+def test_pending_empty(dynamodb_table, capsys):
+    reg = MeetRegistry(TABLE_NAME, region="eu-west-1")
+    cli.run(["pending"], registry=reg, invoke=None)
+    assert "No pending scrapes" in capsys.readouterr().out
+
+
 def test_dispatch_force_all_without_all_flag_errors(dynamodb_table):
     with pytest.raises(SystemExit):
         cli.run(["dispatch", "--force"], registry=None, invoke=lambda payload: None)
