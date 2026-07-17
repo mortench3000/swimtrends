@@ -17,7 +17,7 @@ def list_meets(con, *, category=None, season=None):
         where.append("m.season = ?"); params.append(season)
     clause = ("WHERE " + " AND ".join(where)) if where else ""
     rows = con.execute(f"""
-        SELECT m.season, m.meet_id, m.course, m.meet_date,
+        SELECT m.season, m.meet_id, m.course, m.meet_date, m.venue,
                list_sort(m.category) AS categories, m.meet_name,
                count(DISTINCT o.race_id)          AS races,
                count(o.result_id)                 AS results,
@@ -25,10 +25,10 @@ def list_meets(con, *, category=None, season=None):
         FROM cur_dim_meet m
         LEFT JOIN cur_obt o USING (meet_id)
         {clause}
-        GROUP BY m.season, m.meet_id, m.course, m.meet_date, m.category, m.meet_name
+        GROUP BY m.season, m.meet_id, m.course, m.meet_date, m.venue, m.category, m.meet_name
         ORDER BY m.season, m.meet_id
     """, params).fetchall()
-    cols = ["season", "meet_id", "course", "meet_date", "categories",
+    cols = ["season", "meet_id", "course", "meet_date", "venue", "categories",
             "meet_name", "races", "results", "dsq"]
     return [dict(zip(cols, r)) for r in rows]
 

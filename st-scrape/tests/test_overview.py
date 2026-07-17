@@ -24,10 +24,10 @@ def _obt(rid, meet, race, rank, swimmer, season):
 
 
 MEETS = [
-    dict(meet_id="m1", meet_name="DM Langbane 2024", course="LCM", season=2024,
-         meet_date="11-07-2024", category=["DM-L"]),
-    dict(meet_id="m2", meet_name="DM Kortbane 2020", course="SCM", season=2021,
-         meet_date="14-12-2020", category=["DM-K"]),
+    dict(meet_id="m1", meet_name="DM Langbane 2024", venue="Bellahøj", course="LCM",
+         season=2024, meet_date="11-07-2024", category=["DM-L"]),
+    dict(meet_id="m2", meet_name="DM Kortbane 2020", venue="Esbjerg", course="SCM",
+         season=2021, meet_date="14-12-2020", category=["DM-K"]),
 ]
 OBT = [
     _obt("r1", "m1", 10, 1, "s1", 2024),
@@ -49,6 +49,7 @@ def test_list_meets_sorted_by_season_with_counts():
     assert [r["season"] for r in rows] == [2021, 2024]      # season order
     m1 = next(r for r in rows if r["meet_id"] == "m1")
     assert (m1["races"], m1["results"], m1["dsq"]) == (2, 3, 1)
+    assert m1["venue"] == "Bellahøj"
     m2 = next(r for r in rows if r["meet_id"] == "m2")
     assert (m2["races"], m2["results"], m2["dsq"]) == (1, 2, 0)
 

@@ -171,9 +171,10 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
                 return 0
             print(overview.render_table(
                 ["season", "meet", "course", "date", "races", "results", "dsq",
-                 "categories", "name"],
+                 "categories", "venue", "name"],
                 [[r["season"], r["meet_id"], r["course"], r["meet_date"], r["races"],
-                  r["results"], r["dsq"], r["categories"], r["meet_name"]] for r in rows]))
+                  r["results"], r["dsq"], r["categories"], r["venue"], r["meet_name"]]
+                 for r in rows]))
             return 0
 
         if args.command == "categories":
