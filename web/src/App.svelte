@@ -1,5 +1,6 @@
 <script>
   import { theme, toggleTheme } from './theme.js'
+  import { route } from './router.js'
   let { children } = $props()
 </script>
 
@@ -9,7 +10,15 @@
     {$theme === 'dark' ? '☀︎' : '☾'}
   </button>
 </header>
-<main>{@render children?.()}</main>
+<main>
+  {#if $route.name === 'race'}
+    <p>Løb: {$route.params.raceKey}</p>
+  {:else if $route.name === 'meet'}
+    <p>Stævne: {$route.params.meetId}</p>
+  {:else}
+    <p>Forside</p>
+  {/if}
+</main>
 <footer>
   <a href="https://xn--svmmetider-1cb.dk" rel="noreferrer">Data fra svømmetider.dk</a>
 </footer>
