@@ -1,7 +1,9 @@
 <script>
   import { theme, toggleTheme } from './theme.js'
   import { route } from './router.js'
-  let { children } = $props()
+  import Home from './routes/Home.svelte'
+  import Meet from './routes/Meet.svelte'
+  import Race from './routes/Race.svelte'
 </script>
 
 <header>
@@ -12,11 +14,17 @@
 </header>
 <main>
   {#if $route.name === 'race'}
-    <p>Løb: {$route.params.raceKey}</p>
+    {#key `${$route.params.meetId}/${$route.params.raceKey}`}
+      <Race params={$route.params} />
+    {/key}
   {:else if $route.name === 'meet'}
-    <p>Stævne: {$route.params.meetId}</p>
+    {#key $route.params.meetId}
+      <Meet params={$route.params} />
+    {/key}
   {:else}
-    <p>Forside</p>
+    {#key $route.params.cat}
+      <Home params={$route.params} />
+    {/key}
   {/if}
 </main>
 <footer>
