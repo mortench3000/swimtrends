@@ -338,3 +338,19 @@ def test_build_race_facts_dsq_counted_from_results():
         f"Expected 2 DSQ rows counted, got {out['facts']['dsq']}"
     assert out["facts"]["contestants"] == 2, \
         "contestants must count only valid (non-DQ) swimmers"
+
+
+def test_build_all_writes_full_tree(tmp_path: Path):
+    from webbuild import build
+
+    written = build.build_all(curated_con(), tmp_path)
+    assert (tmp_path / "index.json").exists()
+    assert (tmp_path / "DM-L" / "meets.json").exists()
+    assert (tmp_path / "DM-L" / "M2026" / "meet.json").exists()
+    assert (tmp_path / "DM-L" / "M2026" / "races.json").exists()
+    assert (tmp_path / "DM-L" / "M2026" / "M-100-Fri-LCM.json").exists()
+    # every returned path was actually written
+    assert all(p.exists() for p in written)
+    # spot-check content wiring
+    meet = json.loads((tmp_path / "DM-L" / "M2026" / "meet.json").read_text("utf-8"))
+    assert meet["facts"]["events"] == 2
