@@ -186,6 +186,96 @@ def test_build_race_facts_podium_and_comparison():
     assert podium[0]["time"] == fastest_final_time
 
 
+def test_build_race_winning_time_sub_and_over_minute():
+    """Regression: build_race winning_time must use arg_min, not lexicographic min.
+
+    When one finalist swims sub-minute (e.g. 57.71) and another over-minute
+    (e.g. 1:02.48), lexicographic min("57.71", "1:02.48") returns "1:02.48"
+    because "1" < "5" in ASCII. This test ensures build_race picks the actual
+    fastest time via arg_min(completed_time, completed_centiseconds).
+    """
+    def _obt_row(**kw):
+        base = {
+            "result_id": None, "race_id": None, "meet_id": None, "rank": None,
+            "name": None, "swimmer_id": None, "nationality": "DEN", "club": None,
+            "birth_year": 2005, "completed_time": None, "completed_centiseconds": None,
+            "points": 500, "points_fixed": 500, "season": None, "course": "LCM",
+            "meet_name": None, "venue": "Aarhus", "meet_date": None, "number": 1,
+            "race_name": None, "distance": None, "stroke": None, "gender": None,
+            "relay_count": 1, "type": None, "class": "open",
+        }
+        base.update(kw)
+        return base
+
+    obt = []
+    meet_id, meet_name, season, meet_date = "BR100", "Build Race Sub Over", 2026, "2026-07-19"
+    meets = [dict(meet_id=meet_id, meet_name=meet_name, venue="Aarhus",
+                  course="LCM", season=season, meet_date=meet_date,
+                  category=["DM-L"])]
+
+    # Event: M 100 Fri, two finalists with times on opposite sides of 60 seconds
+    # Times formatted without leading 0: "57.71" (sub-60) vs "1:02.48" (over-60)
+    # Lexicographic min("57.71", "1:02.48") = "1:02.48" (wrong, because "1" < "5")
+    # Correct min by centiseconds: 5771 < 6248, so "57.71" wins
+
+    finalists = [
+        ("sub-fast", "Sub Minute", "FastClub", 5771, "57.71"),         # sub-60
+        ("over-slow", "Over Minute", "SlowClub", 6248, "1:02.48"),     # over-60
+    ]
+
+    # Heats: both finalists + heat fillers
+    rid = 0
+    slowest = max(cs for _, _, _, cs, _ in finalists)
+    for i, (sid, name, club, cs, time_str) in enumerate(sorted(
+        finalists + [
+            (f"h-filler-{j}", f"Heater {j}", "HeatClub", slowest + j * 30,
+             f"{(slowest + j*30)//6000}:{((slowest + j*30)%6000)//100:02d}.{(slowest + j*30)%100:02d}")
+            for j in range(8)
+        ], key=lambda x: x[3]), 1):
+        rid += 1
+        obt.append(_obt_row(
+            result_id=f"{meet_id}-h-{rid}", race_id=rid, meet_id=meet_id,
+            rank=i, name=name, swimmer_id=sid, club=club,
+            completed_time=time_str, completed_centiseconds=cs,
+            season=season, meet_name=meet_name,
+            meet_date=meet_date, distance=100, stroke="Fri", gender="M",
+            type="Heats"))
+
+    # Finals: only finalists, faster times
+    for i, (sid, name, club, cs, _) in enumerate(sorted(finalists, key=lambda x: x[3]), 1):
+        rid += 1
+        fcs = cs - 50  # finalists go 50 cs faster
+        # Format: keep same format style (without leading 0 for sub-60)
+        if fcs < 6000:
+            fcs_str = f"{(fcs % 6000) // 100}.{fcs % 100:02d}"
+        else:
+            fcs_str = f"{fcs // 6000}:{((fcs % 6000) // 100):02d}.{fcs % 100:02d}"
+        obt.append(_obt_row(
+            result_id=f"{meet_id}-f-{rid}", race_id=rid, meet_id=meet_id,
+            rank=i, name=name, swimmer_id=sid, club=club,
+            completed_time=fcs_str, completed_centiseconds=fcs,
+            season=season, meet_name=meet_name,
+            meet_date=meet_date, distance=100, stroke="Fri", gender="M",
+            type="Final"))
+
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+
+    # Query build_race and verify winning_time and podium[0]
+    out = queries.build_race(con, "DM-L", meet_id, "M", 100, "Fri", "LCM")
+
+    # The winner should be the faster finalist (5771 - 50 = 5721 cs = "57.21")
+    assert out["podium"][0]["name"] == "Sub Minute", \
+        f"Expected podium[0] 'Sub Minute' but got '{out['podium'][0]['name']}'"
+    # The winning time should be the sub-minute time (57.21)
+    expected_winning_time = "57.21"
+    assert out["facts"]["winning_time"] == expected_winning_time, \
+        f"Expected facts['winning_time'] '{expected_winning_time}' but got '{out['facts']['winning_time']}'"
+    assert out["podium"][0]["time"] == expected_winning_time, \
+        f"Expected podium[0]['time'] '{expected_winning_time}' but got '{out['podium'][0]['time']}'"
+
+
 def test_build_race_facts_dsq_counted_from_results():
     """Regression: facts["dsq"] must count DSQ rows.
 
