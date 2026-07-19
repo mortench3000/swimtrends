@@ -24,13 +24,15 @@ def _obt_row(**kw):
 
 
 def _event(meet_id, meet_name, season, meet_date, gender, distance, stroke,
-           finalists):
+           finalists, start_rid=1):
     """finalists: list of (swimmer_id, name, club, final_cs). Heats mirror them
-    plus one extra swimmer so an 8th-place cut-line exists when >=8."""
+    plus one extra swimmer so an 8th-place cut-line exists when >=8.
+    Returns (rows, next_rid) so race_id is unique per meet."""
     rows = []
-    rid = 0
+    rid = start_rid - 1
     # heats: everyone + a filler field so entrants can reach 8
-    field = finalists + [(f"h{i}", f"Heat Swimmer {i}", "HeatKlub", 6000 + i * 30)
+    slowest = max(cs for _, _, _, cs in finalists)
+    field = finalists + [(f"h{i}", f"Heat Swimmer {i}", "HeatKlub", slowest + i * 30)
                          for i in range(1, 9)]
     for i, (sid, name, club, cs) in enumerate(sorted(field, key=lambda x: x[3]), 1):
         rid += 1
@@ -52,7 +54,7 @@ def _event(meet_id, meet_name, season, meet_date, gender, distance, stroke,
             completed_centiseconds=fcs, season=season, meet_name=meet_name,
             meet_date=meet_date, distance=distance, stroke=stroke, gender=gender,
             type="Final"))
-    return rows
+    return rows, rid + 1
 
 
 def curated_con() -> duckdb.DuckDBPyConnection:
@@ -63,14 +65,19 @@ def curated_con() -> duckdb.DuckDBPyConnection:
         meets.append(dict(meet_id=mid, meet_name=name, venue="Aarhus",
                           course="LCM", season=season, meet_date=mdate,
                           category=["DM-L"]))
-        obt += _event(mid, name, season, mdate, "M", 100, "Fri",
-                      [("s1", "Anna Berg", "AGF", 5200),
-                       ("s2", "Bo Dahl", "SIGMA", 5250),
-                       ("s3", "Cara Elg", "AGF", 5300)])
-        obt += _event(mid, name, season, mdate, "F", 200, "Ryg",
-                      [("s4", "Dina Fog", "SIGMA", 13000),
-                       ("s5", "Eva Gru", "AGF", 13100),
-                       ("s6", "Fia Hald", "VEST", 13200)])
+        next_rid = 1
+        rows, next_rid = _event(mid, name, season, mdate, "M", 100, "Fri",
+                                [("s1", "Anna Berg", "AGF", 5200),
+                                 ("s2", "Bo Dahl", "SIGMA", 5250),
+                                 ("s3", "Cara Elg", "AGF", 5300)],
+                                start_rid=next_rid)
+        obt += rows
+        rows, next_rid = _event(mid, name, season, mdate, "F", 200, "Ryg",
+                                [("s4", "Dina Fog", "SIGMA", 13000),
+                                 ("s5", "Eva Gru", "AGF", 13100),
+                                 ("s6", "Fia Hald", "VEST", 13200)],
+                                start_rid=next_rid)
+        obt += rows
     con = duckdb.connect()
     build_curated(con, obt=obt, meets=meets, splits=[])
     create_views(con)
