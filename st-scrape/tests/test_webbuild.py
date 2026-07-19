@@ -42,3 +42,15 @@ def test_build_meets_lists_meets_newest_first():
     assert m["events"] == 2                 # 100 Fri + 200 Ryg
     assert m["entrants"] == 22              # 11 distinct swimmers/event x 2
     assert m["clubs"] >= 3
+
+
+def test_build_meet_facts_and_comparison():
+    out = queries.build_meet(curated_con(), "DM-L", "M2026")
+    assert out["meet_id"] == "M2026"
+    f = out["facts"]
+    assert f["events"] == 2
+    assert f["entrants"] == 22
+    assert f["swims"] > 0
+    assert f["top_points"] >= f["median_points"]
+    comp_seasons = [c["season"] for c in out["season_comparison"]]
+    assert comp_seasons == [2026, 2025]        # <=5, newest first
