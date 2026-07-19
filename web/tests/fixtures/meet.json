@@ -1,0 +1,34 @@
+{
+  "category": "DM-L",
+  "meet_id": "M2026",
+  "meet_name": "Dansk Mesterskap 2026",
+  "meet_date": "2026-04-10",
+  "season": 2026,
+  "facts": {
+    "swims": 1200,
+    "entrants": 450,
+    "events": 34,
+    "clubs": 120,
+    "juniors": 85,
+    "median_points": 650,
+    "top_points": 950
+  },
+  "season_comparison": [
+    {
+      "season": 2026,
+      "entrants": 450,
+      "events": 34,
+      "clubs": 120,
+      "median_points": 650,
+      "top_points": 950
+    },
+    {
+      "season": 2025,
+      "entrants": 420,
+      "events": 32,
+      "clubs": 110,
+      "median_points": 620,
+      "top_points": 920
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "category": "DM-L",
+  "meet_id": "M2026",
+  "races": [
+    {
+      "race_key": "M-100-Fri-LCM",
+      "label": "Mænd 100m Freestyle",
+      "gender": "M",
+      "distance": 100,
+      "stroke": "Fri",
+      "course": "LCM",
+      "contestants": 28,
+      "winner_name": "Magnus Jensen",
+      "winning_time": "00:48.32"
+    },
+    {
+      "race_key": "K-200-Bryst-LCM",
+      "label": "Kvinder 200m Brystsvømning",
+      "gender": "F",
+      "distance": 200,
+      "stroke": "Bryst",
+      "course": "LCM",
+      "contestants": 24,
+      "winner_name": "Lena Andersen",
+      "winning_time": "02:25.18"
+    }
+  ]
+}

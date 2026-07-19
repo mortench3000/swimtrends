@@ -1,0 +1,60 @@
+{
+  "category": "DM-L",
+  "meet_id": "M2026",
+  "race_key": "M-100-Fri-LCM",
+  "label": "Mænd 100m Freestyle",
+  "facts": {
+    "contestants": 28,
+    "dsq": 1,
+    "winning_time": "00:48.32",
+    "winner_points": 895,
+    "cutline_centiseconds": 4950,
+    "cutline_time": "00:49.50",
+    "spread_1_8_cs": 285,
+    "spread_1_last_cs": 520,
+    "median_cs": 5125,
+    "median_points": 650,
+    "juniors": 5
+  },
+  "podium": [
+    {
+      "rank": 1,
+      "name": "Magnus Jensen",
+      "club": "KSK",
+      "time": "00:48.32",
+      "points": 895
+    },
+    {
+      "rank": 2,
+      "name": "Andreas Pedersen",
+      "club": "AAU",
+      "time": "00:48.68",
+      "points": 880
+    },
+    {
+      "rank": 3,
+      "name": "Christian Nielsen",
+      "club": "SKIK",
+      "time": "00:49.15",
+      "points": 860
+    }
+  ],
+  "season_comparison": [
+    {
+      "season": 2026,
+      "best_cs": 4832,
+      "median_cs": 5125,
+      "top8_avg_cs": 4920,
+      "cutline_cs": 4950,
+      "swims": 28
+    },
+    {
+      "season": 2025,
+      "best_cs": 4895,
+      "median_cs": 5200,
+      "top8_avg_cs": 4985,
+      "cutline_cs": 5020,
+      "swims": 26
+    }
+  ]
+}
