@@ -32,7 +32,8 @@ def _event(meet_id, meet_name, season, meet_date, gender, distance, stroke,
     rid = start_rid - 1
     # heats: everyone + a filler field so entrants can reach 8
     slowest = max(cs for _, _, _, cs in finalists)
-    field = finalists + [(f"h{i}", f"Heat Swimmer {i}", "HeatKlub", slowest + i * 30)
+    event_tag = f"{gender}{distance}{stroke}"
+    field = finalists + [(f"h-{event_tag}-{i}", f"Heat Swimmer {i}", "HeatKlub", slowest + i * 30)
                          for i in range(1, 9)]
     for i, (sid, name, club, cs) in enumerate(sorted(field, key=lambda x: x[3]), 1):
         rid += 1
