@@ -157,3 +157,30 @@ def test_build_races_winning_time_with_sub_and_over_minute():
     # The winning time should be the sub-minute time (57.71)
     assert race["winning_time"] == "57.71", \
         f"Expected '57.71' but got '{race['winning_time']}'"
+
+
+def test_build_race_facts_podium_and_comparison():
+    con = curated_con()
+    out = queries.build_race(con, "DM-L", "M2026", "M", 100, "Fri", "LCM")
+    assert out["race_key"] == "M-100-Fri-LCM"
+    f = out["facts"]
+    assert f["contestants"] == 11
+    assert f["cutline_centiseconds"] is not None   # 8th heat swim exists
+    assert f["winning_time"] is not None
+    podium = out["podium"]
+    assert [p["rank"] for p in podium] == [1, 2, 3]
+    assert podium[0]["name"] == "Anna Berg"
+    comp_seasons = [c["season"] for c in out["season_comparison"]]
+    assert comp_seasons == [2026, 2025]
+    assert out["season_comparison"][0]["best_cs"] is not None
+
+    # Regression: winning_time must be the fastest finalist's time, not a
+    # lexicographic min of the completed_time strings.
+    fastest_final_time = con.execute(
+        "SELECT completed_time FROM results_by_category "
+        "WHERE category='DM-L' AND meet_id='M2026' AND gender='M' AND distance=100 "
+        "AND stroke='Fri' AND course='LCM' AND phase IN ('final','timed_final') "
+        "AND NOT is_dq ORDER BY completed_centiseconds LIMIT 1"
+    ).fetchone()[0]
+    assert f["winning_time"] == fastest_final_time
+    assert podium[0]["time"] == fastest_final_time
