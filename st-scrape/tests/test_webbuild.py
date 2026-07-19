@@ -340,6 +340,89 @@ def test_build_race_facts_dsq_counted_from_results():
         "contestants must count only valid (non-DQ) swimmers"
 
 
+def test_build_race_excludes_para_from_podium_and_contestants():
+    """Regression: para swims must not leak into the OPEN-tier build_race output.
+
+    A para event ("Direkte finale" -> type 'Timed final' -> phase timed_final,
+    class='para') can duplicate an open event on the SAME (gender, distance,
+    stroke, course) tuple. Without a class='open' filter, results_by_category
+    is unfiltered on class, so the podium query (which matches on
+    phase IN ('final','timed_final')) picks up both open finalists AND para
+    swimmers, producing duplicate ranks and a possible para "winner".
+    """
+    def _obt_row(**kw):
+        base = {
+            "result_id": None, "race_id": None, "meet_id": None, "rank": None,
+            "name": None, "swimmer_id": None, "nationality": "DEN", "club": None,
+            "birth_year": 2005, "completed_time": None, "completed_centiseconds": None,
+            "points": 500, "points_fixed": 500, "season": None, "course": "LCM",
+            "meet_name": None, "venue": "Aarhus", "meet_date": None, "number": 1,
+            "race_name": None, "distance": None, "stroke": None, "gender": None,
+            "relay_count": 1, "type": None, "class": "open",
+        }
+        base.update(kw)
+        return base
+
+    meet_id, season, meet_date = "MPARA", 2026, "2026-07-19"
+    meets = [dict(meet_id=meet_id, meet_name="Para Overlap Meet", venue="Aarhus",
+                  course="LCM", season=season, meet_date=meet_date,
+                  category=["DM-L"])]
+
+    common = dict(season=season, meet_name="Para Overlap Meet", meet_date=meet_date,
+                  distance=100, stroke="Fri", gender="M", meet_id=meet_id)
+
+    open_swimmers = [
+        ("o1", "Anna Berg", "AGF", 5500),
+        ("o2", "Bo Dahl", "SIGMA", 5600),
+        ("o3", "Cara Elg", "AGF", 5700),
+    ]
+    para_swimmers = [
+        ("p1", "Para One", "PARAKLUB", 6000),
+        ("p2", "Para Two", "PARAKLUB", 6100),
+        ("p3", "Para Three", "PARAKLUB", 6200),
+    ]
+
+    obt = []
+    rid = 0
+    # Open: Heats + Final, class='open', ranks 1..N
+    for i, (sid, name, club, cs) in enumerate(open_swimmers, 1):
+        rid += 1
+        obt.append(_obt_row(
+            result_id=f"{meet_id}-h-{rid}", race_id=rid, rank=i, name=name,
+            swimmer_id=sid, club=club, completed_time=f"{cs/100:.2f}",
+            completed_centiseconds=cs + 100, type="Heats", **common))
+    for i, (sid, name, club, cs) in enumerate(open_swimmers, 1):
+        rid += 1
+        obt.append(_obt_row(
+            result_id=f"{meet_id}-f-{rid}", race_id=rid, rank=i, name=name,
+            swimmer_id=sid, club=club, completed_time=f"{cs/100:.2f}",
+            completed_centiseconds=cs, type="Final", **common))
+    # Para: Timed final duplicate of the SAME event tuple, class='para'
+    for i, (sid, name, club, cs) in enumerate(para_swimmers, 1):
+        rid += 1
+        obt.append(_obt_row(
+            result_id=f"{meet_id}-p-{rid}", race_id=rid, rank=i, name=name,
+            swimmer_id=sid, club=club, completed_time=f"{cs/100:.2f}",
+            completed_centiseconds=cs, type="Timed final", **{**common, "class": "para"}))
+
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+
+    out = queries.build_race(con, "DM-L", meet_id, "M", 100, "Fri", "LCM")
+
+    podium = out["podium"]
+    assert [p["rank"] for p in podium] == [1, 2, 3], \
+        f"Expected exactly ranks [1,2,3], got {[p['rank'] for p in podium]}"
+    podium_names = {p["name"] for p in podium}
+    assert podium_names == {"Anna Berg", "Bo Dahl", "Cara Elg"}
+    para_names = {"Para One", "Para Two", "Para Three"}
+    assert not (podium_names & para_names), \
+        f"Para swimmers leaked into podium: {podium_names & para_names}"
+    assert out["facts"]["contestants"] == len(open_swimmers), \
+        "contestants must count only open swimmers, not para"
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 

@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 
 from webbuild import queries
-from webbuild.shape import race_key, write_json
+from webbuild.shape import write_json
 
 
 def build_all(con, out: Path) -> list[Path]:

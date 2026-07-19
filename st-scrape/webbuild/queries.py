@@ -13,7 +13,7 @@ _MEET_FACTS_SQL = """
            CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
            max(points) AS top_points
     FROM results_by_category
-    WHERE category = ? AND meet_id = ?
+    WHERE category = ? AND meet_id = ? AND class = 'open'
 """
 
 _MEET_COMPARE_SQL = """
@@ -24,7 +24,7 @@ _MEET_COMPARE_SQL = """
            CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
            max(points) AS top_points
     FROM results_by_category
-    WHERE category = ? AND season <= ?
+    WHERE category = ? AND season <= ? AND class = 'open'
     GROUP BY season
     ORDER BY season DESC
     LIMIT 5
@@ -34,7 +34,7 @@ _MEET_COMPARE_SQL = """
 def build_index(con) -> dict:
     rows = con.execute(
         "SELECT category, list(DISTINCT season ORDER BY season DESC) AS seasons "
-        "FROM results_by_category GROUP BY category ORDER BY category"
+        "FROM results_by_category WHERE class = 'open' GROUP BY category ORDER BY category"
     ).fetchall()
     return {
         "attribution": ATTRIBUTION,
@@ -51,7 +51,7 @@ def build_meets(con, category: str) -> dict:
                count(DISTINCT (gender, distance, stroke, course)) AS events,
                count(DISTINCT club) AS clubs
         FROM results_by_category
-        WHERE category = ?
+        WHERE category = ? AND class = 'open'
         GROUP BY meet_id
         ORDER BY season DESC, meet_date DESC
         """,
@@ -88,7 +88,7 @@ _RACES_SQL = """
            arg_min(completed_time, completed_centiseconds)
                FILTER (WHERE phase IN ('final','timed_final')) AS winning_time
     FROM results_by_category
-    WHERE category = ? AND meet_id = ? AND NOT is_dq
+    WHERE category = ? AND meet_id = ? AND NOT is_dq AND class = 'open'
     GROUP BY gender, distance, stroke, course
     ORDER BY gender, distance, stroke, course
 """
@@ -113,6 +113,7 @@ _RACE_FACTS_SQL = """
         SELECT * FROM results_by_category
         WHERE category = ? AND meet_id = ?
           AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+          AND class = 'open'
     ),
     fin AS (SELECT * FROM e WHERE phase IN ('final','timed_final') AND NOT is_dq),
     heats AS (
@@ -136,7 +137,7 @@ _RACE_FACTS_SQL = """
 _RACE_DSQ_SQL = """
     SELECT count(*) FROM results
     WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ?
-      AND course = ? AND is_dq AND NOT is_relay
+      AND course = ? AND is_dq AND NOT is_relay AND class = 'open'
 """
 
 _PODIUM_SQL = """
@@ -144,14 +145,16 @@ _PODIUM_SQL = """
     FROM results_by_category
     WHERE category = ? AND meet_id = ? AND gender = ? AND distance = ?
       AND stroke = ? AND course = ? AND phase IN ('final','timed_final')
-      AND rank IN (1, 2, 3)
+      AND rank IN (1, 2, 3) AND class = 'open'
     ORDER BY rank
 """
 
+# ponytail: para not excluded here — event_standard_by_season/final_cutline_by_season
+# are pre-aggregated without class; deferred to Plan 2.
 _RACE_COMPARE_SQL = """
     SELECT s.season, s.best_cs, CAST(s.median_cs AS BIGINT) AS median_cs,
            CAST(s.top8_avg_cs AS BIGINT) AS top8_avg_cs,
-           c.cutline_centiseconds AS cutline_cs, s.swims AS entrants
+           c.cutline_centiseconds AS cutline_cs, s.swims
     FROM event_standard_by_season s
     LEFT JOIN final_cutline_by_season c USING (category, season, course, gender, distance, stroke)
     WHERE s.category = ? AND s.gender = ? AND s.distance = ? AND s.stroke = ?
@@ -179,7 +182,7 @@ def build_race(con, category, meet_id, gender, distance, stroke, course) -> dict
         [meet_id]).fetchone()[0]
     podium = [dict(zip(["rank", "name", "club", "time", "points"], r))
               for r in con.execute(_PODIUM_SQL, args).fetchall()]
-    comp_cols = ["season", "best_cs", "median_cs", "top8_avg_cs", "cutline_cs", "entrants"]
+    comp_cols = ["season", "best_cs", "median_cs", "top8_avg_cs", "cutline_cs", "swims"]
     comp = [dict(zip(comp_cols, r)) for r in con.execute(
         _RACE_COMPARE_SQL,
         [category, gender, distance, stroke, course, season]).fetchall()]
