@@ -30,3 +30,15 @@ def test_build_index_lists_category_and_seasons():
     assert idx["attribution"] == "Data fra svømmetider.dk"
     dm_l = [c for c in idx["categories"] if c["code"] == "DM-L"][0]
     assert dm_l["seasons"] == [2026, 2025]      # newest first
+
+
+def test_build_meets_lists_meets_newest_first():
+    out = queries.build_meets(curated_con(), "DM-L")
+    assert out["category"] == "DM-L"
+    seasons = [m["season"] for m in out["meets"]]
+    assert seasons == [2026, 2025]
+    m = out["meets"][0]
+    assert m["meet_id"] == "M2026"
+    assert m["events"] == 2                 # 100 Fri + 200 Ryg
+    assert m["entrants"] == 22              # 11 distinct swimmers/event x 2
+    assert m["clubs"] >= 3
