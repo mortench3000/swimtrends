@@ -14,6 +14,7 @@
   let meets = $state(null)
   let loading = $state(true)
   let err = $state(null)
+  let meetsErr = $state(null)
 
   onMount(load)
 
@@ -34,11 +35,12 @@
   async function loadMeets() {
     if (!cat) return
     meets = null
+    meetsErr = null
     try {
       const res = await getMeets(cat)
       meets = res.meets
     } catch (e) {
-      err = e
+      meetsErr = e
     }
   }
 
@@ -72,7 +74,9 @@
     {/each}
   </div>
 
-  {#if meets === null}
+  {#if meetsErr}
+    <p class="state bad">Kunne ikke hentes.</p>
+  {:else if meets === null}
     <p class="state muted">Indlæser…</p>
   {:else if meets.length === 0}
     <p class="state muted">Ingen stævner fundet.</p>

@@ -14,11 +14,11 @@
 </header>
 <main>
   {#if $route.name === 'race'}
-    {#key `${$route.params.meetId}/${$route.params.raceKey}`}
+    {#key `${$route.params.cat}/${$route.params.meetId}/${$route.params.raceKey}`}
       <Race params={$route.params} />
     {/key}
   {:else if $route.name === 'meet'}
-    {#key $route.params.meetId}
+    {#key `${$route.params.cat}/${$route.params.meetId}`}
       <Meet params={$route.params} />
     {/key}
   {:else}
