@@ -1,5 +1,7 @@
 """One function per JSON payload. Each takes a bound DuckDB connection."""
 
+from webbuild.shape import race_key
+
 ATTRIBUTION = "Data fra svømmetider.dk"
 
 _MEET_FACTS_SQL = """
@@ -76,3 +78,31 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     return {"category": category, "meet_id": meet_id, "meet_name": head[0],
             "meet_date": head[1], "season": head[2],
             "facts": facts, "season_comparison": comp}
+
+
+_RACES_SQL = """
+    SELECT gender, distance, stroke, course,
+           count(DISTINCT swimmer_id) AS contestants,
+           arg_min(name, completed_centiseconds)
+               FILTER (WHERE phase IN ('final','timed_final')) AS winner_name,
+           min(completed_time)
+               FILTER (WHERE phase IN ('final','timed_final')) AS winning_time
+    FROM results_by_category
+    WHERE category = ? AND meet_id = ? AND NOT is_dq
+    GROUP BY gender, distance, stroke, course
+    ORDER BY gender, distance, stroke, course
+"""
+
+
+def build_races(con, category: str, meet_id: str) -> dict:
+    rows = con.execute(_RACES_SQL, [category, meet_id]).fetchall()
+    races = []
+    for gender, distance, stroke, course, contestants, winner, wtime in rows:
+        races.append({
+            "race_key": race_key(gender, distance, stroke, course),
+            "label": f"{gender} {distance}m {stroke} ({course})",
+            "gender": gender, "distance": distance, "stroke": stroke,
+            "course": course, "contestants": contestants,
+            "winner_name": winner, "winning_time": wtime,
+        })
+    return {"category": category, "meet_id": meet_id, "races": races}
