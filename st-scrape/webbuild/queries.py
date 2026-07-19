@@ -122,7 +122,6 @@ _RACE_FACTS_SQL = """
     )
     SELECT
         (SELECT count(DISTINCT swimmer_id) FROM e WHERE NOT is_dq) AS contestants,
-        (SELECT count(*) FROM e WHERE is_dq) AS dsq,
         (SELECT arg_min(completed_time, completed_centiseconds) FROM fin) AS winning_time,
         (SELECT max(points) FROM fin) AS winner_points,
         (SELECT completed_centiseconds FROM heats WHERE hr = 8) AS cutline_cs,
@@ -132,6 +131,12 @@ _RACE_FACTS_SQL = """
         (SELECT CAST(quantile_cont(completed_centiseconds, 0.5) AS BIGINT) FROM e WHERE NOT is_dq) AS median_cs,
         (SELECT CAST(quantile_cont(points, 0.5) AS BIGINT) FROM e WHERE NOT is_dq) AS median_points,
         (SELECT count(DISTINCT swimmer_id) FROM e WHERE is_junior) AS juniors
+"""
+
+_RACE_DSQ_SQL = """
+    SELECT count(*) FROM results
+    WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ?
+      AND course = ? AND is_dq AND NOT is_relay
 """
 
 _PODIUM_SQL = """
@@ -158,10 +163,16 @@ _RACE_COMPARE_SQL = """
 
 def build_race(con, category, meet_id, gender, distance, stroke, course) -> dict:
     args = [category, meet_id, gender, distance, stroke, course]
-    fact_cols = ["contestants", "dsq", "winning_time", "winner_points",
+    fact_cols = ["contestants", "winning_time", "winner_points",
                  "cutline_centiseconds", "spread_1_8_cs", "spread_1_last_cs",
                  "median_cs", "median_points", "juniors"]
     facts = dict(zip(fact_cols, con.execute(_RACE_FACTS_SQL, args).fetchone()))
+    # DSQ rows are excluded from results_by_category (individual_results filters
+    # NOT is_dq upstream, see analytics/views/00_base.sql), so they must be
+    # counted from the base `results` view instead. Not category-scoped, but
+    # the meet_id + event tuple already pins the data unambiguously.
+    facts["dsq"] = con.execute(
+        _RACE_DSQ_SQL, [meet_id, gender, distance, stroke, course]).fetchone()[0]
     facts["cutline_time"] = None  # centiseconds is the comparable value; label formatted client-side
     season = con.execute(
         "SELECT any_value(season) FROM results_by_category WHERE meet_id = ?",

@@ -184,3 +184,67 @@ def test_build_race_facts_podium_and_comparison():
     ).fetchone()[0]
     assert f["winning_time"] == fastest_final_time
     assert podium[0]["time"] == fastest_final_time
+
+
+def test_build_race_facts_dsq_counted_from_results():
+    """Regression: facts["dsq"] must count DSQ rows.
+
+    _RACE_FACTS_SQL previously sourced "dsq" from results_by_category, which
+    is built on individual_results (analytics/views/00_base.sql), and that
+    view filters out is_dq rows upstream. So dsq was silently always 0.
+    DSQ rows live in the base `results` view and must be counted from there:
+    meet_id + event tuple, is_dq, NOT is_relay.
+    """
+    def _obt_row(**kw):
+        base = {
+            "result_id": None, "race_id": None, "meet_id": None, "rank": None,
+            "name": None, "swimmer_id": None, "nationality": "DEN", "club": None,
+            "birth_year": 2005, "completed_time": None, "completed_centiseconds": None,
+            "points": 500, "points_fixed": 500, "season": None, "course": "LCM",
+            "meet_name": None, "venue": "Aarhus", "meet_date": None, "number": 1,
+            "race_name": None, "distance": None, "stroke": None, "gender": None,
+            "relay_count": 1, "type": None, "class": "open",
+        }
+        base.update(kw)
+        return base
+
+    meet_id, season, meet_date = "MDSQ", 2026, "2026-07-19"
+    meets = [dict(meet_id=meet_id, meet_name="DSQ Meet", venue="Aarhus",
+                  course="LCM", season=season, meet_date=meet_date,
+                  category=["DM-L"])]
+
+    common = dict(season=season, meet_name="DSQ Meet", meet_date=meet_date,
+                  distance=100, stroke="Fri", gender="M", meet_id=meet_id)
+
+    obt = [
+        # Two valid finalists (heats + final each, as the fixture pattern does)
+        _obt_row(result_id="h1", race_id=1, rank=1, name="A One", swimmer_id="s1",
+                 club="AGF", completed_time="55.00", completed_centiseconds=5500,
+                 type="Heats", **common),
+        _obt_row(result_id="h2", race_id=2, rank=2, name="B Two", swimmer_id="s2",
+                 club="AGF", completed_time="56.00", completed_centiseconds=5600,
+                 type="Heats", **common),
+        _obt_row(result_id="f1", race_id=3, rank=1, name="A One", swimmer_id="s1",
+                 club="AGF", completed_time="54.50", completed_centiseconds=5450,
+                 type="Final", **common),
+        _obt_row(result_id="f2", race_id=4, rank=2, name="B Two", swimmer_id="s2",
+                 club="AGF", completed_time="55.50", completed_centiseconds=5550,
+                 type="Final", **common),
+        # DSQ rows: rank -1, individual (relay_count=1), same event/meet
+        _obt_row(result_id="dq1", race_id=5, rank=-1, name="C Three", swimmer_id="s3",
+                 club="AGF", completed_time="DSQ", completed_centiseconds=None,
+                 type="Heats", **common),
+        _obt_row(result_id="dq2", race_id=6, rank=-1, name="D Four", swimmer_id="s4",
+                 club="AGF", completed_time="DSQ", completed_centiseconds=None,
+                 type="Final", **common),
+    ]
+
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+
+    out = queries.build_race(con, "DM-L", meet_id, "M", 100, "Fri", "LCM")
+    assert out["facts"]["dsq"] == 2, \
+        f"Expected 2 DSQ rows counted, got {out['facts']['dsq']}"
+    assert out["facts"]["contestants"] == 2, \
+        "contestants must count only valid (non-DQ) swimmers"
