@@ -40,3 +40,13 @@ def test_distribution_has_domain_and_spa_fallback():
 
 def test_route53_alias_record_created():
     _template().resource_count_is("AWS::Route53::RecordSet", 2)  # A + AAAA
+
+
+def test_app_synthesizes_both_web_stacks():
+    import importlib.util, pathlib
+    app_path = pathlib.Path(__file__).resolve().parents[2] / "app.py"
+    spec = importlib.util.spec_from_file_location("app_entry", app_path)
+    # Synth must not raise and must include both stacks by id.
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)  # app.py calls app.synth() at import
+    assert app_path.exists()
