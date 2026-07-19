@@ -1,0 +1,23 @@
+{
+  "name": "swimtrends-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5",
+    "@testing-library/jest-dom": "^6",
+    "@testing-library/svelte": "^5",
+    "jsdom": "^25",
+    "svelte": "^5",
+    "vite": "^6",
+    "vitest": "^3"
+  },
+  "dependencies": {
+    "@observablehq/plot": "^0.6"
+  }
+}
