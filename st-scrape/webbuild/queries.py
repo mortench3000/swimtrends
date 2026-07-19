@@ -85,7 +85,7 @@ _RACES_SQL = """
            count(DISTINCT swimmer_id) AS contestants,
            arg_min(name, completed_centiseconds)
                FILTER (WHERE phase IN ('final','timed_final')) AS winner_name,
-           min(completed_time)
+           arg_min(completed_time, completed_centiseconds)
                FILTER (WHERE phase IN ('final','timed_final')) AS winning_time
     FROM results_by_category
     WHERE category = ? AND meet_id = ? AND NOT is_dq
