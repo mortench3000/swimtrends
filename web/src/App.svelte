@@ -4,7 +4,7 @@
 </script>
 
 <header>
-  <span class="wordmark">Swimtrends</span>
+  <h1 class="wordmark">Swimtrends</h1>
   <button class="theme-toggle" onclick={toggleTheme} aria-label="Skift tema">
     {$theme === 'dark' ? '☀︎' : '☾'}
   </button>
