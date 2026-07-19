@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from webbuild import shape
+from webbuild import shape, queries
 from tests.webbuild_fixtures import curated_con
 
 
@@ -23,3 +23,10 @@ def test_fixture_has_views_and_two_seasons():
         "SELECT DISTINCT season FROM results_by_category "
         "WHERE category='DM-L' ORDER BY season").fetchall()]
     assert seasons == [2025, 2026]
+
+
+def test_build_index_lists_category_and_seasons():
+    idx = queries.build_index(curated_con())
+    assert idx["attribution"] == "Data fra svømmetider.dk"
+    dm_l = [c for c in idx["categories"] if c["code"] == "DM-L"][0]
+    assert dm_l["seasons"] == [2026, 2025]      # newest first
