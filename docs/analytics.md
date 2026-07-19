@@ -90,6 +90,14 @@ interpreter at `st-scrape/.venv` and sets the notebook working dir to
 package, so it runs even if launched from elsewhere. `con.sql(...)` returns a
 DuckDB result; the `q(...)` helper returns a pandas DataFrame for tables/plots.
 
+## Web JSON build
+Generate the static JSON the web app serves (reads the curated zone from S3):
+
+    cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m webbuild --out ../web/public/data
+
+Output mirrors the app's URL layout (index.json, <category>/meets.json,
+<category>/<meet_id>/{meet,races}.json, <category>/<meet_id>/<race_key>.json).
+
 ## View catalog
 - **Best times / ranking:** `personal_best`, `season_best`, `event_leaderboard`
 - **Progression:** `swimmer_progression`, `biggest_improvers`, `cross_era_best`,
