@@ -100,7 +100,7 @@ def build_races(con, category: str, meet_id: str) -> dict:
     for gender, distance, stroke, course, contestants, winner, wtime in rows:
         races.append({
             "race_key": race_key(gender, distance, stroke, course),
-            "label": f"{gender} {distance}m {stroke} ({course})",
+            "label": f"{gender} {distance}m {stroke}",
             "gender": gender, "distance": distance, "stroke": stroke,
             "course": course, "contestants": contestants,
             "winner_name": winner, "winning_time": wtime,
@@ -141,7 +141,7 @@ _RACE_DSQ_SQL = """
 """
 
 _PODIUM_SQL = """
-    SELECT rank, name, club, completed_time AS time, points
+    SELECT rank, name, swimmer_id, club, completed_time AS time, points
     FROM results_by_category
     WHERE category = ? AND meet_id = ? AND gender = ? AND distance = ?
       AND stroke = ? AND course = ? AND phase IN ('final','timed_final')
@@ -180,7 +180,7 @@ def build_race(con, category, meet_id, gender, distance, stroke, course) -> dict
     season = con.execute(
         "SELECT any_value(season) FROM results_by_category WHERE meet_id = ?",
         [meet_id]).fetchone()[0]
-    podium = [dict(zip(["rank", "name", "club", "time", "points"], r))
+    podium = [dict(zip(["rank", "name", "swimmer_id", "club", "time", "points"], r))
               for r in con.execute(_PODIUM_SQL, args).fetchall()]
     comp_cols = ["season", "best_cs", "median_cs", "top8_avg_cs", "cutline_cs", "swims"]
     comp = [dict(zip(comp_cols, r)) for r in con.execute(
@@ -188,5 +188,5 @@ def build_race(con, category, meet_id, gender, distance, stroke, course) -> dict
         [category, gender, distance, stroke, course, season]).fetchall()]
     return {"category": category, "meet_id": meet_id,
             "race_key": race_key(gender, distance, stroke, course),
-            "label": f"{gender} {distance}m {stroke} ({course})",
+            "label": f"{gender} {distance}m {stroke}",
             "facts": facts, "podium": podium, "season_comparison": comp}

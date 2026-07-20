@@ -20,6 +20,7 @@
     {
       "rank": 1,
       "name": "Magnus Jensen",
+      "swimmer_id": "27005",
       "club": "KSK",
       "time": "00:48.32",
       "points": 895
@@ -27,6 +28,7 @@
     {
       "rank": 2,
       "name": "Andreas Pedersen",
+      "swimmer_id": "31122",
       "club": "AAU",
       "time": "00:48.68",
       "points": 880
@@ -34,6 +36,7 @@
     {
       "rank": 3,
       "name": "Christian Nielsen",
+      "swimmer_id": "40988",
       "club": "SKIK",
       "time": "00:49.15",
       "points": 860

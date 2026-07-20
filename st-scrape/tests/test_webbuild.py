@@ -65,7 +65,7 @@ def test_build_races_lists_events_with_winner():
     keys = {r["race_key"] for r in out["races"]}
     assert "M-100-Fri-LCM" in keys
     fri = [r for r in out["races"] if r["race_key"] == "M-100-Fri-LCM"][0]
-    assert fri["label"] == "M 100m Fri (LCM)"
+    assert fri["label"] == "M 100m Fri"     # course notation dropped
     assert fri["contestants"] == 11         # 3 finalists + 8 heat fillers
     assert fri["winner_name"] == "Anna Berg"   # fastest final
 
@@ -170,6 +170,8 @@ def test_build_race_facts_podium_and_comparison():
     podium = out["podium"]
     assert [p["rank"] for p in podium] == [1, 2, 3]
     assert podium[0]["name"] == "Anna Berg"
+    assert podium[0]["swimmer_id"] == "s1"     # for the profile link
+    assert out["label"] == "M 100m Fri"        # course notation dropped
     comp_seasons = [c["season"] for c in out["season_comparison"]]
     assert comp_seasons == [2026, 2025]
     assert out["season_comparison"][0]["best_cs"] is not None
