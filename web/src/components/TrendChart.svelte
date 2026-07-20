@@ -73,7 +73,7 @@
         fontFamily: 'inherit',
         fontSize: '11px',
       },
-      x: { type: 'point', label: null, tickFormat: (d) => d },
+      x: { type: 'point', label: null, tickFormat: (d) => String(d) },
       y: { label: null, grid: false, reverse: lowerIsBetter, nice: true, tickFormat: format },
       marks,
     })
