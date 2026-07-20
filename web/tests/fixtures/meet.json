@@ -11,7 +11,8 @@
     "clubs": 120,
     "juniors": 85,
     "median_points": 650,
-    "top_points": 950
+    "top_points": 950,
+    "elite_median_points": 812
   },
   "season_comparison": [
     {
@@ -20,7 +21,8 @@
       "events": 34,
       "clubs": 120,
       "median_points": 650,
-      "top_points": 950
+      "top_points": 950,
+      "elite_median_points": 812
     },
     {
       "season": 2025,
@@ -28,7 +30,8 @@
       "events": 32,
       "clubs": 110,
       "median_points": 620,
-      "top_points": 920
+      "top_points": 920,
+      "elite_median_points": 795
     }
   ]
 }
