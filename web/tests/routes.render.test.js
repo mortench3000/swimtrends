@@ -23,3 +23,15 @@ test('Race renders podium winner and winning time', async () => {
   await waitFor(() => expect(screen.getByText(raceJson.podium[0].name)).toBeInTheDocument())
   expect(screen.getAllByText(raceJson.facts.winning_time)).toHaveLength(2)
 })
+
+test('podium winner name links to their svømmetider.dk profile in a new tab', async () => {
+  vi.spyOn(dc, 'getRace').mockResolvedValue(raceJson)
+  render(Race, { params: { cat: 'DM-L', meetId: 'M2026', raceKey: 'M-100-Fri-LCM' } })
+  const link = await screen.findByRole('link', { name: new RegExp(raceJson.podium[0].name) })
+  expect(link).toHaveAttribute(
+    'href',
+    `https://svømmetider.dk/svoemmer/?${raceJson.podium[0].swimmer_id}`,
+  )
+  expect(link).toHaveAttribute('target', '_blank')
+  expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+})

@@ -1,7 +1,8 @@
 <script>
   import { formatTimeStr, formatPoints } from '../lib/format.js'
+  import SwimmerLink from './SwimmerLink.svelte'
 
-  // props: { podium } — rows { rank, name, club, time, points }
+  // props: { podium } — rows { rank, name, swimmer_id, club, time, points }
   let { podium = [] } = $props()
 
   const byRank = (r) => podium.find((p) => p.rank === r)
@@ -15,7 +16,7 @@
     {#if p}
       <div class="podium-block rank-{r}">
         <div class="podium-info">
-          <div class="podium-name">{p.name}</div>
+          <div class="podium-name"><SwimmerLink name={p.name} id={p.swimmer_id} /></div>
           <div class="podium-club muted">{p.club}</div>
           <div class="podium-time num">{formatTimeStr(p.time)}</div>
           <div class="podium-points num muted">{formatPoints(p.points)}</div>
@@ -87,9 +88,8 @@
 
   .rank-2 .podium-riser {
     height: 3.75rem;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text);
+    background: #b9c4d0; /* silver — visible on both dark and light backgrounds */
+    color: #0b0f14;
   }
 
   .rank-3 .podium-riser {
