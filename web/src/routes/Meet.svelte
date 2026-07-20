@@ -108,6 +108,13 @@
       yLabel="Median point pr. sæson"
       format={formatInt}
     />
+    <TrendChart
+      data={meet.season_comparison}
+      x="season"
+      y="elite_median_points"
+      yLabel="Elite-median point pr. sæson (top 10 pr. løb)"
+      format={formatInt}
+    />
   </div>
 
   <h3 class="section-title">Løb</h3>

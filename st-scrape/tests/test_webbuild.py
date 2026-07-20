@@ -56,8 +56,12 @@ def test_build_meet_facts_and_comparison():
     assert f["entrants"] == 22
     assert f["swims"] > 0
     assert f["top_points"] >= f["median_points"]
+    # elite (top-10-per-event) median points: present on facts + every comparison
+    # row. Fixture points are uniform (500), so the median is exactly 500.
+    assert f["elite_median_points"] == 500
     comp_seasons = [c["season"] for c in out["season_comparison"]]
     assert comp_seasons == [2026, 2025]        # <=5, newest first
+    assert all(c["elite_median_points"] == 500 for c in out["season_comparison"])
 
 
 def test_build_races_lists_events_with_winner():

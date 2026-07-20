@@ -30,6 +30,31 @@ _MEET_COMPARE_SQL = """
     LIMIT 5
 """
 
+# Elite depth per season: median WA points among the top 10 (by points) in EACH
+# individual event, pooled. A swimmer's heat/final is deduped to their best per
+# event first; only scored open swims count.
+_MEET_ELITE_SQL = """
+    WITH best AS (
+        SELECT season, gender, distance, stroke, course, swimmer_id,
+               max(points) AS pts
+        FROM results_by_category
+        WHERE category = ? AND season <= ? AND class = 'open'
+          AND points IS NOT NULL AND swimmer_id IS NOT NULL
+        GROUP BY season, gender, distance, stroke, course, swimmer_id
+    ),
+    ranked AS (
+        SELECT season, pts,
+               row_number() OVER (
+                   PARTITION BY season, gender, distance, stroke, course
+                   ORDER BY pts DESC) AS rk
+        FROM best
+    )
+    SELECT season, CAST(quantile_cont(pts, 0.5) AS BIGINT) AS elite_median_points
+    FROM ranked
+    WHERE rk <= 10
+    GROUP BY season
+"""
+
 
 def build_index(con) -> dict:
     rows = con.execute(
@@ -75,6 +100,12 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     comp_cols = ["season", "entrants", "events", "clubs", "median_points", "top_points"]
     comp = [dict(zip(comp_cols, r)) for r in con.execute(
         _MEET_COMPARE_SQL, [category, head[2]]).fetchall()]
+    # Elite (top-10-per-event) median points, keyed by season, merged into the
+    # facts (this meet's season) and each comparison row.
+    elite = dict(con.execute(_MEET_ELITE_SQL, [category, head[2]]).fetchall())
+    facts["elite_median_points"] = elite.get(head[2])
+    for c in comp:
+        c["elite_median_points"] = elite.get(c["season"])
     return {"category": category, "meet_id": meet_id, "meet_name": head[0],
             "meet_date": head[1], "season": head[2],
             "facts": facts, "season_comparison": comp}
