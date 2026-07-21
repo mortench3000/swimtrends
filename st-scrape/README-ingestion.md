@@ -19,7 +19,8 @@ cd swimtrends-app
 .venv/bin/cdk deploy SwimtrendsIngestionStack -c alert_email=you@example.com
 ```
 
-The existing `SwimtrendsAppStack` (S3 bucket, Glue, Athena) is untouched.
+The existing `SwimtrendsAppStack` (which owns the `swimtrends-meet-data` S3
+bucket) is untouched.
 
 ## Configure the CLI
 
