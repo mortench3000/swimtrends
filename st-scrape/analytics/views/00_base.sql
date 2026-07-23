@@ -23,3 +23,10 @@ FROM cur_obt o;
 CREATE OR REPLACE VIEW individual_results AS
 SELECT * FROM results
 WHERE NOT is_relay AND swimmer_id IS NOT NULL AND NOT is_dq;
+
+-- Relay entries, for the meet-page relay path only. Mirrors individual_results
+-- but keeps null swimmer_id (a relay has no single swimmer). DQ excluded here;
+-- para is excluded downstream by class='open' in the webbuild relay queries.
+CREATE OR REPLACE VIEW relay_results AS
+SELECT * FROM results
+WHERE is_relay AND NOT is_dq;
