@@ -32,13 +32,17 @@
   const tiles = $derived(
     race
       ? [
-          { label: 'Deltagere', value: formatInt(race.facts.contestants) },
+          { label: race.is_relay ? 'Hold' : 'Deltagere', value: formatInt(race.facts.contestants) },
           { label: 'Diskvalifikationer', value: formatInt(race.facts.dsq) },
           { label: 'Vindertid', value: formatTimeStr(race.facts.winning_time) },
-          { label: 'A-finale-grænse', value: formatTime(race.facts.cutline_centiseconds) },
+          ...(race.is_relay ? [] : [
+            { label: 'A-finale-grænse', value: formatTime(race.facts.cutline_centiseconds) },
+          ]),
           { label: 'Median', value: formatTime(race.facts.median_cs) },
-          { label: 'Spredning 1.–8.', value: formatTime(race.facts.spread_1_8_cs) },
-          { label: 'Juniorer', value: formatInt(race.facts.juniors) },
+          ...(race.is_relay ? [] : [
+            { label: 'Spredning 1.–8.', value: formatTime(race.facts.spread_1_8_cs) },
+            { label: 'Juniorer', value: formatInt(race.facts.juniors) },
+          ]),
         ]
       : [],
   )
@@ -98,14 +102,16 @@
       lowerIsBetter={true}
       format={formatTime}
     />
-    <TrendChart
-      data={race.season_comparison}
-      x="season"
-      y="cutline_cs"
-      yLabel="A-finale-grænse pr. sæson"
-      lowerIsBetter={true}
-      format={formatTime}
-    />
+    {#if !race.is_relay}
+      <TrendChart
+        data={race.season_comparison}
+        x="season"
+        y="cutline_cs"
+        yLabel="A-finale-grænse pr. sæson"
+        lowerIsBetter={true}
+        format={formatTime}
+      />
+    {/if}
     <TrendChart
       data={race.season_comparison}
       x="season"

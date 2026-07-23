@@ -128,7 +128,7 @@
             <span class="race-label">{r.label}</span>
             <span class="race-winner muted">{r.winner_name ?? '–'}</span>
             <span class="race-time num">{formatTimeStr(r.winning_time)}</span>
-            <span class="race-count num muted">{formatInt(r.contestants)} deltagere</span>
+            <span class="race-count num muted">{formatInt(r.contestants)} {r.is_relay ? 'hold' : 'deltagere'}</span>
           </a>
         </li>
       {/each}
