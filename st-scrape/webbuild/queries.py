@@ -67,6 +67,27 @@ def build_index(con) -> dict:
     }
 
 
+_MEETS_RELAY_EVENTS_SQL = """
+    SELECT meet_id, count(DISTINCT (gender, distance, stroke, course, relay_count)) AS n
+    FROM relay_results_by_category
+    WHERE category = ? AND class = 'open'
+    GROUP BY meet_id
+"""
+
+_MEET_RELAY_EVENTS_SQL = """
+    SELECT count(DISTINCT (gender, distance, stroke, course, relay_count))
+    FROM relay_results_by_category
+    WHERE category = ? AND meet_id = ? AND class = 'open'
+"""
+
+_MEET_RELAY_EVENTS_BY_SEASON_SQL = """
+    SELECT season, count(DISTINCT (gender, distance, stroke, course, relay_count)) AS n
+    FROM relay_results_by_category
+    WHERE category = ? AND season <= ? AND class = 'open'
+    GROUP BY season
+"""
+
+
 def build_meets(con, category: str) -> dict:
     rows = con.execute(
         """
@@ -83,8 +104,11 @@ def build_meets(con, category: str) -> dict:
         [category],
     ).fetchall()
     cols = ["meet_id", "meet_name", "meet_date", "season", "entrants", "events", "clubs"]
-    return {"category": category,
-            "meets": [dict(zip(cols, r)) for r in rows]}
+    rel = dict(con.execute(_MEETS_RELAY_EVENTS_SQL, [category]).fetchall())
+    result = [dict(zip(cols, r)) for r in rows]
+    for m in result:
+        m["events"] += rel.get(m["meet_id"], 0)
+    return {"category": category, "meets": result}
 
 
 def build_meet(con, category: str, meet_id: str) -> dict:
@@ -106,6 +130,12 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     facts["elite_median_points"] = elite.get(head[2])
     for c in comp:
         c["elite_median_points"] = elite.get(c["season"])
+    facts["events"] += con.execute(
+        _MEET_RELAY_EVENTS_SQL, [category, meet_id]).fetchone()[0]
+    rel_by_season = dict(con.execute(
+        _MEET_RELAY_EVENTS_BY_SEASON_SQL, [category, head[2]]).fetchall())
+    for c in comp:
+        c["events"] += rel_by_season.get(c["season"], 0)
     return {"category": category, "meet_id": meet_id, "meet_name": head[0],
             "meet_date": head[1], "season": head[2],
             "facts": facts, "season_comparison": comp}
@@ -125,15 +155,38 @@ _RACES_SQL = """
 """
 
 
+_RELAY_RACES_SQL = """
+    SELECT gender, distance, stroke, course, relay_count,
+           count(*) AS contestants,
+           arg_min(name, completed_centiseconds) AS winner_name,
+           arg_min(completed_time, completed_centiseconds) AS winning_time
+    FROM relay_results_by_category
+    WHERE category = ? AND meet_id = ? AND class = 'open'
+    GROUP BY gender, distance, stroke, course, relay_count
+    ORDER BY gender, distance, stroke, course, relay_count
+"""
+
+
 def build_races(con, category: str, meet_id: str) -> dict:
-    rows = con.execute(_RACES_SQL, [category, meet_id]).fetchall()
     races = []
-    for gender, distance, stroke, course, contestants, winner, wtime in rows:
+    for gender, distance, stroke, course, contestants, winner, wtime in con.execute(
+            _RACES_SQL, [category, meet_id]).fetchall():
         races.append({
             "race_key": race_key(gender, distance, stroke, course),
             "label": f"{gender} {distance}m {stroke}",
             "gender": gender, "distance": distance, "stroke": stroke,
-            "course": course, "contestants": contestants,
+            "course": course, "relay_count": 1, "is_relay": False,
+            "contestants": contestants,
+            "winner_name": winner, "winning_time": wtime,
+        })
+    for gender, distance, stroke, course, rc, contestants, winner, wtime in con.execute(
+            _RELAY_RACES_SQL, [category, meet_id]).fetchall():
+        races.append({
+            "race_key": race_key(gender, distance, stroke, course, rc),
+            "label": f"{gender} {rc}x{distance}m {stroke}",
+            "gender": gender, "distance": distance, "stroke": stroke,
+            "course": course, "relay_count": rc, "is_relay": True,
+            "contestants": contestants,
             "winner_name": winner, "winning_time": wtime,
         })
     return {"category": category, "meet_id": meet_id, "races": races}

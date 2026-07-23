@@ -434,6 +434,33 @@ def test_build_race_excludes_para_from_podium_and_contestants():
         "contestants must count only open swimmers, not para"
 
 
+def test_build_races_includes_relay_with_team_winner():
+    from tests.webbuild_fixtures import relay_con
+    out = queries.build_races(relay_con(), "DM-L", "R2026")
+    relay = [r for r in out["races"] if r["race_key"] == "F-4x100-HM-LCM"]
+    assert len(relay) == 1
+    r = relay[0]
+    assert r["is_relay"] is True
+    assert r["relay_count"] == 4
+    assert r["label"] == "F 4x100m HM"
+    assert r["contestants"] == 3               # 3 teams (DQ team excluded)
+    assert r["winner_name"] == "Aalborg 1"     # fastest team
+    # individual event still present and unflagged
+    ind = [r for r in out["races"] if r["race_key"] == "M-100-Fri-LCM"][0]
+    assert ind["is_relay"] is False
+
+
+def test_meet_event_count_includes_relays():
+    from tests.webbuild_fixtures import relay_con
+    con = relay_con()
+    meets = queries.build_meets(con, "DM-L")
+    m = [m for m in meets["meets"] if m["meet_id"] == "R2026"][0]
+    assert m["events"] == 2                     # 1 individual + 1 relay
+    meet = queries.build_meet(con, "DM-L", "R2026")
+    assert meet["facts"]["events"] == 2
+    assert all(c["events"] == 2 for c in meet["season_comparison"])
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 
