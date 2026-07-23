@@ -13,6 +13,11 @@ def test_race_key_slug():
     assert shape.race_key("M", 100, "Fri", "LCM") == "M-100-Fri-LCM"
 
 
+def test_race_key_relay_form():
+    assert shape.race_key("F", 100, "HM", "LCM", relay_count=4) == "F-4x100-HM-LCM"
+    assert shape.race_key("M", 100, "Fri", "LCM") == "M-100-Fri-LCM"  # individual unchanged
+
+
 def test_write_json_roundtrip_keeps_danish(tmp_path: Path):
     p = tmp_path / "sub" / "x.json"
     shape.write_json(p, {"club": "Svømmeklubben Åræø"})
@@ -427,6 +432,60 @@ def test_build_race_excludes_para_from_podium_and_contestants():
         f"Para swimmers leaked into podium: {podium_names & para_names}"
     assert out["facts"]["contestants"] == len(open_swimmers), \
         "contestants must count only open swimmers, not para"
+
+
+def test_build_races_includes_relay_with_team_winner():
+    from tests.webbuild_fixtures import relay_con
+    out = queries.build_races(relay_con(), "DM-L", "R2026")
+    relay = [r for r in out["races"] if r["race_key"] == "F-4x100-HM-LCM"]
+    assert len(relay) == 1
+    r = relay[0]
+    assert r["is_relay"] is True
+    assert r["relay_count"] == 4
+    assert r["label"] == "F 4x100m HM"
+    assert r["contestants"] == 3               # 3 teams (DQ team excluded)
+    assert r["winner_name"] == "Aalborg 1"     # fastest team
+    # individual event still present and unflagged
+    ind = [r for r in out["races"] if r["race_key"] == "M-100-Fri-LCM"][0]
+    assert ind["is_relay"] is False
+
+
+def test_meet_event_count_includes_relays():
+    from tests.webbuild_fixtures import relay_con
+    con = relay_con()
+    meets = queries.build_meets(con, "DM-L")
+    m = [m for m in meets["meets"] if m["meet_id"] == "R2026"][0]
+    assert m["events"] == 2                     # 1 individual + 1 relay
+    meet = queries.build_meet(con, "DM-L", "R2026")
+    assert meet["facts"]["events"] == 2
+    assert all(c["events"] == 2 for c in meet["season_comparison"])
+
+
+def test_build_race_relay_detail():
+    from tests.webbuild_fixtures import relay_con
+    con = relay_con()
+    out = queries.build_race(con, "DM-L", "R2026", "F", 100, "HM", "LCM", relay_count=4)
+    assert out["is_relay"] is True
+    assert out["race_key"] == "F-4x100-HM-LCM"
+    assert out["label"] == "F 4x100m HM"
+    f = out["facts"]
+    assert f["contestants"] == 3               # DQ team excluded from contestants
+    assert f["dsq"] == 1                        # the DQ team counted here
+    assert f["winning_time"] == "4:10.51"       # fastest team
+    assert "cutline_centiseconds" not in f      # no cut-line for relays
+    podium = out["podium"]
+    assert [p["rank"] for p in podium] == [1, 2, 3]
+    assert podium[0]["name"] == "Aalborg 1"
+    assert podium[0]["swimmer_id"] is None       # relay -> no swimmer link
+    comp = out["season_comparison"]
+    assert all(c["cutline_cs"] is None for c in comp)   # relay trends carry no cut-line
+    assert comp[0]["best_cs"] == 25051
+
+
+def test_build_race_individual_flagged_not_relay():
+    from tests.webbuild_fixtures import relay_con
+    out = queries.build_race(relay_con(), "DM-L", "R2026", "M", 100, "Fri", "LCM")
+    assert out["is_relay"] is False
 
 
 def test_build_all_writes_full_tree(tmp_path: Path):

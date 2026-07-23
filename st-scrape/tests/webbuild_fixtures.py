@@ -58,6 +58,59 @@ def _event(meet_id, meet_name, season, meet_date, gender, distance, stroke,
     return rows, rid + 1
 
 
+def _relay_event(meet_id, meet_name, season, meet_date, gender, distance, stroke,
+                 relay_count, teams, start_rid):
+    """teams: list of (team_name, club, cs). One timed-final row per team, ranked."""
+    rows = []
+    rid = start_rid
+    for i, (name, club, cs) in enumerate(sorted(teams, key=lambda x: x[2]), 1):
+        rows.append(_obt_row(
+            result_id=f"{meet_id}-r-{rid}", race_id=rid, meet_id=meet_id,
+            rank=i, name=name, swimmer_id=None, club=club,
+            completed_time=f"{cs//6000}:{(cs%6000)//100:02d}.{cs%100:02d}",
+            completed_centiseconds=cs, season=season, meet_name=meet_name,
+            meet_date=meet_date, distance=distance, stroke=stroke, gender=gender,
+            relay_count=relay_count, type="Timed final"))
+        rid += 1
+    return rows, rid
+
+
+def relay_con() -> duckdb.DuckDBPyConnection:
+    """A DM-L meet in 2025 + 2026 with individual AND relay events, so relay
+    queries and the individual aggregates are exercised side by side. Separate
+    from curated_con() so its magic numbers stay stable."""
+    obt, meets = [], []
+    for season, mid, mdate in [(2025, "R2025", "2025-04-10"),
+                               (2026, "R2026", "2026-04-10")]:
+        name = f"Relay Champs {season}"
+        meets.append(dict(meet_id=mid, meet_name=name, venue="Aarhus",
+                          course="LCM", season=season, meet_date=mdate,
+                          category=["DM-L"]))
+        rid = 1
+        rows, rid = _event(mid, name, season, mdate, "M", 100, "Fri",
+                           [("s1", "Anna Berg", "AGF", 5200),
+                            ("s2", "Bo Dahl", "SIGMA", 5250),
+                            ("s3", "Cara Elg", "AGF", 5300)], start_rid=rid)
+        obt += rows
+        rows, rid = _relay_event(mid, name, season, mdate, "F", 100, "HM", 4,
+                                 [("Aalborg 1", "Aalborg SK", 25051),
+                                  ("Thisted", "Thisted SK", 25444),
+                                  ("A6 1", "A6", 26254)], start_rid=rid)
+        obt += rows
+    # a DQ relay team in 2026 (rank -1): excluded from relay_results, counted by
+    # the relay DSQ query (Task 4).
+    obt.append(_obt_row(
+        result_id="R2026-dq", race_id=9990, meet_id="R2026", rank=-1,
+        name="DQ Team", swimmer_id=None, club="DQ SK", completed_time=None,
+        completed_centiseconds=None, season=2026, meet_name="Relay Champs 2026",
+        meet_date="2026-04-10", distance=100, stroke="HM", gender="F",
+        relay_count=4, type="Timed final"))
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+    return con
+
+
 def curated_con() -> duckdb.DuckDBPyConnection:
     obt, meets = [], []
     for season, mid, mdate in [(2025, "M2025", "2025-04-10"),

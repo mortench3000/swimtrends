@@ -35,3 +35,23 @@ test('podium winner name links to their svømmetider.dk profile in a new tab', a
   expect(link).toHaveAttribute('target', '_blank')
   expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
 })
+
+const relayRace = {
+  category: 'DM-L', meet_id: 'R2026', race_key: 'F-4x100-HM-LCM',
+  label: 'F 4x100m HM', is_relay: true,
+  facts: { contestants: 3, dsq: 1, winning_time: '4:10.51', median_cs: 25444,
+           spread_1_last_cs: 1203, winner_points: 500 },
+  podium: [{ rank: 1, name: 'Aalborg 1', swimmer_id: null, club: 'Aalborg SK',
+             time: '4:10.51', points: 500 }],
+  season_comparison: [{ season: 2026, best_cs: 25051, median_cs: 25444,
+                        top8_avg_cs: 25300, cutline_cs: null, swims: 3 }],
+}
+
+test('Race renders a relay page without junior/cut-line/spread tiles and with a plain team name', async () => {
+  vi.spyOn(dc, 'getRace').mockResolvedValue(relayRace)
+  const { container } = render(Race, { params: { cat: 'DM-L', meetId: 'R2026', raceKey: 'F-4x100-HM-LCM' } })
+  await waitFor(() => expect(screen.getByText('Aalborg 1')).toBeInTheDocument())
+  expect(container.textContent).not.toContain('A-finale-grænse')
+  expect(container.textContent).not.toContain('Juniorer')
+  expect(container.querySelector('a.swimmer-link')).toBeNull()
+})
