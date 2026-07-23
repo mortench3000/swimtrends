@@ -13,6 +13,11 @@ def test_race_key_slug():
     assert shape.race_key("M", 100, "Fri", "LCM") == "M-100-Fri-LCM"
 
 
+def test_race_key_relay_form():
+    assert shape.race_key("F", 100, "HM", "LCM", relay_count=4) == "F-4x100-HM-LCM"
+    assert shape.race_key("M", 100, "Fri", "LCM") == "M-100-Fri-LCM"  # individual unchanged
+
+
 def test_write_json_roundtrip_keeps_danish(tmp_path: Path):
     p = tmp_path / "sub" / "x.json"
     shape.write_json(p, {"club": "Svømmeklubben Åræø"})
