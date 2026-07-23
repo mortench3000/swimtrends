@@ -7,7 +7,10 @@
 </script>
 
 <header>
-  <h1 class="wordmark">Swimtrends</h1>
+  <div class="brand">
+    <h1 class="wordmark">Swimtrends</h1>
+    <span class="tagline">Trends i dansk konkurrencesvømning</span>
+  </div>
   <button class="theme-toggle" onclick={toggleTheme} aria-label="Skift tema">
     {$theme === 'dark' ? '☀︎' : '☾'}
   </button>
@@ -29,4 +32,5 @@
 </main>
 <footer>
   <a href="https://xn--svmmetider-1cb.dk" rel="noreferrer">Data fra svømmetider.dk</a>
+  <span>Swimtrends er ikke tilknyttet SvømDanmark, Danmarks Svømmeunion.</span>
 </footer>
