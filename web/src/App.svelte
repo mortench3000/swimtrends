@@ -32,5 +32,5 @@
 </main>
 <footer>
   <a href="https://xn--svmmetider-1cb.dk" rel="noreferrer">Data fra svømmetider.dk</a>
-  <span>Swimtrends er ikke tilknyttet SvømDanmark, Danmarks Svømmeunion.</span>
+  <span>Swimtrends er et ikke-kommercielt forskningsprojekt og er ikke tilknyttet SvømDanmark, Danmarks Svømmeunion.</span>
 </footer>
