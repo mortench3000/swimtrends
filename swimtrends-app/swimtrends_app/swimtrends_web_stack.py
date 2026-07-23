@@ -2,6 +2,7 @@
 alias for swimtrends.dk. Static SPA + precomputed /data/*.json are pushed by
 the deploy/refresh script (see docs/superpowers/deploy-web.md), not by CDK."""
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
+from aws_cdk import aws_budgets as budgets
 from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_cloudfront_origins as origins
@@ -16,7 +17,8 @@ HOSTED_ZONE_ID = "Z05943842L8KIUA914B4J"
 
 class SwimtrendsWebStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *,
-                 certificate: acm.ICertificate, **kwargs) -> None:
+                 certificate: acm.ICertificate, alert_email: str | None = None,
+                 **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         bucket = s3.Bucket(
@@ -55,6 +57,34 @@ class SwimtrendsWebStack(Stack):
             targets.CloudFrontTarget(distribution))
         route53.ARecord(self, "AliasA", zone=zone, target=alias, record_name=DOMAIN)
         route53.AaaaRecord(self, "AliasAAAA", zone=zone, target=alias, record_name=DOMAIN)
+
+        # Account-wide monthly cost budget: early warning if a bot flood (or
+        # anything else) pushes AWS spend past normal — the site normally costs
+        # cents/month. Budgets can't cap spend, only alert; email rides on the
+        # same -c alert_email the other stacks use, so omitting it drops this
+        # notification too. 50%/100% of a low limit catches anomalies fast.
+        if alert_email:
+            thresholds = [
+                ("ACTUAL", 50), ("ACTUAL", 100), ("FORECASTED", 100),
+            ]
+            budgets.CfnBudget(
+                self, "MonthlyCostBudget",
+                budget=budgets.CfnBudget.BudgetDataProperty(
+                    budget_type="COST", time_unit="MONTHLY",
+                    budget_limit=budgets.CfnBudget.SpendProperty(
+                        amount=20, unit="USD"),
+                ),
+                notifications_with_subscribers=[
+                    budgets.CfnBudget.NotificationWithSubscribersProperty(
+                        notification=budgets.CfnBudget.NotificationProperty(
+                            notification_type=ntype,
+                            comparison_operator="GREATER_THAN", threshold=pct),
+                        subscribers=[budgets.CfnBudget.SubscriberProperty(
+                            subscription_type="EMAIL", address=alert_email)],
+                    )
+                    for ntype, pct in thresholds
+                ],
+            )
 
         CfnOutput(self, "SiteBucketName", value=bucket.bucket_name)
         CfnOutput(self, "DistributionId", value=distribution.distribution_id)

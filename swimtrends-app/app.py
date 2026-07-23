@@ -31,6 +31,7 @@ cert_stack = SwimtrendsCertStack(
     app, "SwimtrendsCertStack", env=ENV_US, cross_region_references=True)
 SwimtrendsWebStack(
     app, "SwimtrendsWebStack", certificate=cert_stack.certificate,
+    alert_email=app.node.try_get_context("alert_email"),
     env=ENV, cross_region_references=True)
 
 app.synth()
