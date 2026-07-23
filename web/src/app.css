@@ -126,12 +126,27 @@ header {
   border-image: linear-gradient(90deg, var(--accent) 0%, transparent 65%) 1;
 }
 
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
 .wordmark {
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text);
+}
+
+.tagline {
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .theme-toggle {
@@ -179,6 +194,11 @@ footer {
 footer a {
   color: var(--muted);
   text-decoration: underline;
+}
+
+footer span {
+  display: block;
+  margin-top: var(--space-1);
 }
 
 footer a:hover {
