@@ -14,6 +14,7 @@ def _template():
         cross_region_references=True)
     web = SwimtrendsWebStack(
         app, "TestWeb", certificate=cert.certificate,
+        alert_email="alerts@example.com",
         env=cdk.Environment(account=ACC, region="eu-west-1"),
         cross_region_references=True)
     return assertions.Template.from_stack(web)
@@ -40,6 +41,25 @@ def test_distribution_has_domain_and_spa_fallback():
 
 def test_route53_alias_record_created():
     _template().resource_count_is("AWS::Route53::RecordSet", 2)  # A + AAAA
+
+
+def test_cost_budget_alarm_created():
+    t = _template()
+    t.resource_count_is("AWS::Budgets::Budget", 1)
+    t.has_resource_properties("AWS::Budgets::Budget", {
+        "Budget": assertions.Match.object_like({
+            "BudgetType": "COST",
+            "TimeUnit": "MONTHLY",
+        }),
+        "NotificationsWithSubscribers": assertions.Match.array_with([
+            assertions.Match.object_like({
+                "Subscribers": [{
+                    "SubscriptionType": "EMAIL",
+                    "Address": "alerts@example.com",
+                }],
+            }),
+        ]),
+    })
 
 
 def test_app_synthesizes_both_web_stacks():
