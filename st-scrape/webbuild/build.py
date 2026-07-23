@@ -29,7 +29,8 @@ def build_all(con, out: Path) -> list[Path]:
             for r in races["races"]:
                 emit(f"{code}/{mid}/{r['race_key']}.json",
                      queries.build_race(con, code, mid, r["gender"],
-                                        r["distance"], r["stroke"], r["course"]))
+                                        r["distance"], r["stroke"], r["course"],
+                                        r["relay_count"]))
     return written
 
 

@@ -248,7 +248,77 @@ _RACE_COMPARE_SQL = """
 """
 
 
-def build_race(con, category, meet_id, gender, distance, stroke, course) -> dict:
+_RELAY_RACE_FACTS_SQL = """
+    WITH e AS (
+        SELECT * FROM relay_results_by_category
+        WHERE category = ? AND meet_id = ?
+          AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+          AND relay_count = ? AND class = 'open'
+    )
+    SELECT
+        (SELECT count(*) FROM e) AS contestants,
+        (SELECT arg_min(completed_time, completed_centiseconds) FROM e) AS winning_time,
+        (SELECT max(points) FROM e) AS winner_points,
+        (SELECT max(completed_centiseconds) - min(completed_centiseconds) FROM e) AS spread_1_last_cs,
+        (SELECT CAST(quantile_cont(completed_centiseconds, 0.5) AS BIGINT) FROM e) AS median_cs
+"""
+
+# Relay DQ rows are excluded from relay_results_by_category (relay_results filters
+# NOT is_dq); count them from the base `results` view, pinned by the event tuple.
+_RELAY_RACE_DSQ_SQL = """
+    SELECT count(*) FROM results
+    WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ?
+      AND course = ? AND relay_count = ? AND is_relay AND is_dq AND class = 'open'
+"""
+
+_RELAY_PODIUM_SQL = """
+    SELECT rank, name, swimmer_id, club, completed_time AS time, points
+    FROM relay_results_by_category
+    WHERE category = ? AND meet_id = ? AND gender = ? AND distance = ?
+      AND stroke = ? AND course = ? AND relay_count = ?
+      AND rank IN (1, 2, 3) AND class = 'open'
+    ORDER BY rank
+"""
+
+_RELAY_RACE_COMPARE_SQL = """
+    SELECT season, best_cs, CAST(median_cs AS BIGINT) AS median_cs,
+           CAST(top8_avg_cs AS BIGINT) AS top8_avg_cs, swims
+    FROM relay_event_standard_by_season
+    WHERE category = ? AND gender = ? AND distance = ? AND stroke = ?
+      AND course = ? AND relay_count = ? AND season <= ?
+    ORDER BY season DESC
+    LIMIT 5
+"""
+
+
+def _build_relay_race(con, category, meet_id, gender, distance, stroke, course, relay_count) -> dict:
+    args = [category, meet_id, gender, distance, stroke, course, relay_count]
+    fact_cols = ["contestants", "winning_time", "winner_points",
+                 "spread_1_last_cs", "median_cs"]
+    facts = dict(zip(fact_cols, con.execute(_RELAY_RACE_FACTS_SQL, args).fetchone()))
+    facts["dsq"] = con.execute(
+        _RELAY_RACE_DSQ_SQL,
+        [meet_id, gender, distance, stroke, course, relay_count]).fetchone()[0]
+    season = con.execute(
+        "SELECT any_value(season) FROM relay_results_by_category WHERE meet_id = ?",
+        [meet_id]).fetchone()[0]
+    podium = [dict(zip(["rank", "name", "swimmer_id", "club", "time", "points"], r))
+              for r in con.execute(_RELAY_PODIUM_SQL, args).fetchall()]
+    comp = [{"season": s, "best_cs": b, "median_cs": m, "top8_avg_cs": t,
+             "cutline_cs": None, "swims": sw}
+            for (s, b, m, t, sw) in con.execute(
+                _RELAY_RACE_COMPARE_SQL,
+                [category, gender, distance, stroke, course, relay_count, season]).fetchall()]
+    return {"category": category, "meet_id": meet_id,
+            "race_key": race_key(gender, distance, stroke, course, relay_count),
+            "label": f"{gender} {relay_count}x{distance}m {stroke}",
+            "is_relay": True, "facts": facts, "podium": podium,
+            "season_comparison": comp}
+
+
+def build_race(con, category, meet_id, gender, distance, stroke, course, relay_count=1) -> dict:
+    if relay_count > 1:
+        return _build_relay_race(con, category, meet_id, gender, distance, stroke, course, relay_count)
     args = [category, meet_id, gender, distance, stroke, course]
     fact_cols = ["contestants", "winning_time", "winner_points",
                  "cutline_centiseconds", "spread_1_8_cs", "spread_1_last_cs",
@@ -273,4 +343,5 @@ def build_race(con, category, meet_id, gender, distance, stroke, course) -> dict
     return {"category": category, "meet_id": meet_id,
             "race_key": race_key(gender, distance, stroke, course),
             "label": f"{gender} {distance}m {stroke}",
+            "is_relay": False,
             "facts": facts, "podium": podium, "season_comparison": comp}

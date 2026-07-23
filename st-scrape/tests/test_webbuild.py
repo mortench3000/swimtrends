@@ -461,6 +461,33 @@ def test_meet_event_count_includes_relays():
     assert all(c["events"] == 2 for c in meet["season_comparison"])
 
 
+def test_build_race_relay_detail():
+    from tests.webbuild_fixtures import relay_con
+    con = relay_con()
+    out = queries.build_race(con, "DM-L", "R2026", "F", 100, "HM", "LCM", relay_count=4)
+    assert out["is_relay"] is True
+    assert out["race_key"] == "F-4x100-HM-LCM"
+    assert out["label"] == "F 4x100m HM"
+    f = out["facts"]
+    assert f["contestants"] == 3               # DQ team excluded from contestants
+    assert f["dsq"] == 1                        # the DQ team counted here
+    assert f["winning_time"] == "4:10.51"       # fastest team
+    assert "cutline_centiseconds" not in f      # no cut-line for relays
+    podium = out["podium"]
+    assert [p["rank"] for p in podium] == [1, 2, 3]
+    assert podium[0]["name"] == "Aalborg 1"
+    assert podium[0]["swimmer_id"] is None       # relay -> no swimmer link
+    comp = out["season_comparison"]
+    assert all(c["cutline_cs"] is None for c in comp)   # relay trends carry no cut-line
+    assert comp[0]["best_cs"] == 25051
+
+
+def test_build_race_individual_flagged_not_relay():
+    from tests.webbuild_fixtures import relay_con
+    out = queries.build_race(relay_con(), "DM-L", "R2026", "M", 100, "Fri", "LCM")
+    assert out["is_relay"] is False
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 
