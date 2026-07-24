@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { render, screen, waitFor, fireEvent } from '@testing-library/svelte'
 import { expect, test, vi, beforeEach } from 'vitest'
 import * as dc from '../src/lib/dataClient.js'
 import Meet from '../src/routes/Meet.svelte'
 import Race from '../src/routes/Race.svelte'
 import meetJson from './fixtures/meet.json'
 import racesJson from './fixtures/races.json'
+import filterRacesJson from './fixtures/races.filter.json'
 import raceJson from './fixtures/race.json'
 
 beforeEach(() => { dc._resetCache() })
@@ -15,6 +16,41 @@ test('Meet renders facts and a race link', async () => {
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: meetJson.meet_name })).toBeInTheDocument())
   expect(screen.getByRole('heading', { level: 3, name: /løb/i })).toBeInTheDocument()
+})
+
+test('Meet shows a Stafet chip only when the meet has relays', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(filterRacesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByRole('button', { name: 'Stafet' })
+  expect(screen.getByRole('button', { name: 'Bryst' })).toBeInTheDocument()
+})
+
+test('Meet has no Stafet chip when there are no relays', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson) // 2 individual races, no relay
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByRole('button', { name: 'Fri' }) // racesJson has an individual Fri race
+  expect(screen.queryByRole('button', { name: 'Stafet' })).toBeNull()
+})
+
+test('clicking Bryst narrows the list to bryst individual races', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(filterRacesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await fireEvent.click(await screen.findByRole('button', { name: 'Bryst' }))
+  expect(screen.getByRole('link', { name: /Kvinder 200m Bryst/ })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /Mænd 100m Fri/ })).toBeNull()
+  expect(screen.queryByRole('link', { name: /Mix 4x100m HM/ })).toBeNull()
+})
+
+test('clicking Stafet shows the relay and hides individual races', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(filterRacesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await fireEvent.click(await screen.findByRole('button', { name: 'Stafet' }))
+  expect(screen.getByRole('link', { name: /Mix 4x100m HM/ })).toBeInTheDocument()
+  expect(screen.queryByRole('link', { name: /Mænd 100m Fri/ })).toBeNull()
 })
 
 test('Race renders podium winner and winning time', async () => {

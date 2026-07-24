@@ -1,0 +1,27 @@
+{
+  "category": "DM-L",
+  "meet_id": "M2026",
+  "races": [
+    {
+      "race_key": "M-100-Fri-LCM",
+      "label": "Mænd 100m Fri",
+      "gender": "M", "distance": 100, "stroke": "Fri", "course": "LCM",
+      "is_relay": false, "contestants": 28,
+      "winner_name": "Magnus Jensen", "winning_time": "00:48.32"
+    },
+    {
+      "race_key": "F-200-Bryst-LCM",
+      "label": "Kvinder 200m Bryst",
+      "gender": "F", "distance": 200, "stroke": "Bryst", "course": "LCM",
+      "is_relay": false, "contestants": 24,
+      "winner_name": "Lena Andersen", "winning_time": "02:25.18"
+    },
+    {
+      "race_key": "X-4x100-HM-LCM",
+      "label": "Mix 4x100m HM",
+      "gender": "X", "distance": 100, "stroke": "HM", "course": "LCM",
+      "relay_count": 4, "is_relay": true, "contestants": 6,
+      "winner_name": "Aalborg 1", "winning_time": "03:45.10"
+    }
+  ]
+}
