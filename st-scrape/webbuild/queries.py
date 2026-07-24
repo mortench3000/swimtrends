@@ -291,6 +291,41 @@ _RELAY_RACE_COMPARE_SQL = """
 """
 
 
+def _meet_is_combined(con, meet_id) -> bool:
+    """True when the meet is tagged with a senior (non-junior) category alongside a
+    junior one. At such a meet juniors have no separate final, so the junior title
+    comes from the qualifying swim (see analytics/views/60_junior.sql). Detected via
+    the raw category list on cur_dim_meet: needs both a tag not starting with 'DMJ'
+    (a senior tag) and a tag starting with 'DMJ' (a junior tag)."""
+    row = con.execute(
+        "SELECT category FROM cur_dim_meet WHERE meet_id = ?", [meet_id]).fetchone()
+    if not row:
+        return False
+    cats = row[0]
+    return (any(not c.startswith("DMJ") for c in cats)
+            and any(c.startswith("DMJ") for c in cats))
+
+
+_JUNIOR_PODIUM_SQL = """
+    SELECT junior_rank AS rank, name, swimmer_id, club, completed_time AS time, points
+    FROM junior_championship
+    WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+      AND junior_rank IN (1, 2, 3)
+    ORDER BY junior_rank
+"""
+
+
+def _build_junior_race(con, meet_id, gender, distance, stroke, course) -> dict:
+    args = [meet_id, gender, distance, stroke, course]
+    podium = [dict(zip(["rank", "name", "swimmer_id", "club", "time", "points"], r))
+              for r in con.execute(_JUNIOR_PODIUM_SQL, args).fetchall()]
+    return {"category": "DMJ-L", "meet_id": meet_id,
+            "race_key": race_key(gender, distance, stroke, course),
+            "label": f"{gender} {distance}m {stroke}",
+            "is_relay": False, "junior_scoped": True,
+            "facts": {}, "podium": podium, "season_comparison": []}
+
+
 def _build_relay_race(con, category, meet_id, gender, distance, stroke, course, relay_count) -> dict:
     args = [category, meet_id, gender, distance, stroke, course, relay_count]
     fact_cols = ["contestants", "winning_time", "winner_points",
@@ -319,6 +354,8 @@ def _build_relay_race(con, category, meet_id, gender, distance, stroke, course, 
 def build_race(con, category, meet_id, gender, distance, stroke, course, relay_count=1) -> dict:
     if relay_count > 1:
         return _build_relay_race(con, category, meet_id, gender, distance, stroke, course, relay_count)
+    if category == "DMJ-L" and _meet_is_combined(con, meet_id):
+        return _build_junior_race(con, meet_id, gender, distance, stroke, course)
     args = [category, meet_id, gender, distance, stroke, course]
     fact_cols = ["contestants", "winning_time", "winner_points",
                  "cutline_centiseconds", "spread_1_8_cs", "spread_1_last_cs",
@@ -343,5 +380,5 @@ def build_race(con, category, meet_id, gender, distance, stroke, course, relay_c
     return {"category": category, "meet_id": meet_id,
             "race_key": race_key(gender, distance, stroke, course),
             "label": f"{gender} {distance}m {stroke}",
-            "is_relay": False,
+            "is_relay": False, "junior_scoped": False,
             "facts": facts, "podium": podium, "season_comparison": comp}

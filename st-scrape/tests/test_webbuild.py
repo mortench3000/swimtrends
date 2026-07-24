@@ -488,6 +488,30 @@ def test_build_race_individual_flagged_not_relay():
     assert out["is_relay"] is False
 
 
+def test_combined_dmjl_podium_is_junior_not_senior():
+    from tests.webbuild_fixtures import combined_con
+    con = combined_con()
+    # senior page: unchanged, senior final podium
+    dm = queries.build_race(con, "DM-L", "C2026", "M", 100, "Fri", "LCM")
+    assert [p["name"] for p in dm["podium"]] == ["Senior Ace", "Senior Two", "Senior Three"]
+    assert dm["junior_scoped"] is False
+    # junior page: junior championship podium (heat times), different swimmers
+    jr = queries.build_race(con, "DMJ-L", "C2026", "M", 100, "Fri", "LCM")
+    assert jr["junior_scoped"] is True
+    assert [p["rank"] for p in jr["podium"]] == [1, 2, 3]
+    assert [p["name"] for p in jr["podium"]] == ["Junior Fast", "Junior Mid", "Junior Slow"]
+    assert jr["podium"][0]["swimmer_id"] == "cj1"      # profile link
+    assert jr["podium"][0]["time"] == "0:57.00"        # 5700 cs, the qualifying swim
+    assert jr["race_key"] == "M-100-Fri-LCM"
+    assert jr["label"] == "M 100m Fri"
+
+
+def test_meet_is_combined_detects_senior_tag():
+    from tests.webbuild_fixtures import combined_con, curated_con
+    assert queries._meet_is_combined(combined_con(), "C2026") is True
+    assert queries._meet_is_combined(curated_con(), "M2026") is False   # DM-L only
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 
