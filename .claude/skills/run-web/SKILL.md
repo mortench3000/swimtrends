@@ -17,9 +17,12 @@ genders: `DM-L/10334` (DM Langbane 2023).
 
 ```bash
 cd web
-npm run dev -- --port 5199 >/tmp/vite5199.log 2>&1 &
-sleep 3 && curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5199/   # expect 200
+npm run dev:bg                                                              # background on :5199, logs to /tmp/swimtrends-vite.log
+sleep 3 && curl -s -o /dev/null -w "%{http_code}\n" http://localhost:5199/  # expect 200
 ```
+
+(`npm run dev` is the plain foreground server; `dev:bg` backgrounds it on the
+fixed port the driver expects.)
 
 ## Screenshot (headless Playwright)
 
@@ -43,7 +46,7 @@ OUT=/tmp/home ROUTE='#/c/DM-L' PORT=5199 node screenshot.mjs
 ```
 
 Then **look at the PNG** (Read it). A blank frame means the SPA never mounted —
-check `/tmp/vite5199.log` and that the route/meet exists under `web/public/data/`.
+check `/tmp/swimtrends-vite.log` and that the route/meet exists under `web/public/data/`.
 
 To drive interactions (click a filter chip, then shoot), copy `screenshot.mjs` and
 add Playwright calls before `page.screenshot`, e.g.
@@ -54,7 +57,7 @@ click before shooting, or colors will be caught mid-transition.
 ## Cleanup
 
 ```bash
-pkill -f "vite --port 5199"
+npm run dev:stop   # pkill the :5199 server; prints "stopped" / "not running"
 ```
 
 ## Gotchas (all verified 2026-07-24)
