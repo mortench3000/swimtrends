@@ -22,3 +22,13 @@ web-refresh:
 	cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m webbuild --out ../web/public/data
 	aws s3 sync web/public/data s3://$(WEB_BUCKET)/data/ --delete --profile swimtrends
 	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) --paths "/data/*" --profile swimtrends
+
+# Full web release: run the SPA unit tests, then build+deploy the app, then
+# refresh the data. Stops at the first failure. (webbuild breakage surfaces in
+# web-refresh; st-scrape's pytest suite is not run here — use `make test`.)
+web-release:
+	cd web && npm test
+	$(MAKE) web-deploy
+	$(MAKE) web-refresh
+
+.PHONY: web-dev web-deploy web-refresh web-release
