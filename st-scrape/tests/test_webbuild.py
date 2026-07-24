@@ -542,6 +542,18 @@ def test_noncombined_dmjl_is_unchanged():
     assert out["podium"][0]["name"] == "Ung Anna"              # from the final
 
 
+def test_combined_dmjl_graphs_reflect_juniors_only():
+    from tests.webbuild_fixtures import combined_con
+    jr = queries.build_race(combined_con(), "DMJ-L", "C2026", "M", 100, "Fri", "LCM")
+    comp = jr["season_comparison"]
+    assert [c["season"] for c in comp] == [2026, 2025]     # newest first, both seasons
+    row = comp[0]
+    assert row["best_cs"] == 5700          # fastest junior qualifying swim, not senior
+    assert row["swims"] == 4               # four juniors, not the full field
+    assert row["cutline_cs"] is None       # no junior final -> no cutline curve
+    assert row["top8_avg_cs"] is not None
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 
