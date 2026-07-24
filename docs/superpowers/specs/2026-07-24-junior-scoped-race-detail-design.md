@@ -52,7 +52,19 @@ must stay untouched (the user explicitly wants all graphs kept for those).
   `category = 'DMJ-L'`. DMJ-K is never combined with a senior category, so its
   page is already correct and needs no change. A future short-course combined
   junior championship would require generalising the view; not now.
-- Any change to DM-L, relays, or non-combined junior pages.
+- Any change to DM-L or non-combined junior pages.
+- **Relays stay senior-scoped everywhere** (race list, race detail, meet header
+  event counts). There is no junior-relay title and `junior_championship`
+  excludes relays, so a combined meet's relays remain the meet's open/senior
+  relays on both the DM-L and DMJ-L pages — consistent list↔detail.
+- **Category meet-list cards** (`build_meets`, the per-meet cards on the
+  category landing page) remain senior-scoped for combined DMJ-L meets. A
+  deliberate follow-up, not in this iteration.
+
+Note: the meet page itself (race list + header facts/trends) IS junior-scoped
+for combined DMJ-L meets — see the plan's Addendum (Tasks 5–7), added after the
+whole-branch review found the meet page inconsistent with the junior-scoped
+detail pages.
 
 ## Detection: is a meet combined?
 
