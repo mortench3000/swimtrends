@@ -91,3 +91,34 @@ test('Race renders a relay page without junior/cut-line/spread tiles and with a 
   expect(container.textContent).not.toContain('Juniorer')
   expect(container.querySelector('a.swimmer-link')).toBeNull()
 })
+
+const juniorRace = {
+  category: 'DMJ-L', meet_id: 'C2026', race_key: 'M-100-Fri-LCM',
+  label: 'M 100m Fri', is_relay: false, junior_scoped: true,
+  facts: {
+    contestants: 4, dsq: 0, winning_time: '0:57.00', median_cs: 5775,
+    spread_1_last_cs: 150, winner_points: 500,
+    cutline_centiseconds: null, spread_1_8_cs: null, juniors: null,
+  },
+  podium: [{ rank: 1, name: 'Junior Fast', swimmer_id: 'cj1', club: 'AGF',
+             time: '0:57.00', points: 500 }],
+  season_comparison: [{ season: 2026, best_cs: 5700, median_cs: 5775,
+                        top8_avg_cs: 5775, cutline_cs: null, swims: 4 }],
+}
+
+test('junior-scoped race hides senior-structure tiles', async () => {
+  vi.spyOn(dc, 'getRace').mockResolvedValue(juniorRace)
+  render(Race, { params: { cat: 'DMJ-L', meetId: 'C2026', raceKey: 'M-100-Fri-LCM' } })
+  await waitFor(() => expect(screen.getByText('Junior Fast')).toBeInTheDocument())
+  expect(screen.queryByText('A-finale-grænse')).toBeNull()
+  expect(screen.queryByText('Spredning 1.–8.')).toBeNull()
+  expect(screen.queryByText('Juniorer')).toBeNull()
+  expect(screen.getByText('Deltagere')).toBeInTheDocument()   // kept
+})
+
+test('non-junior race still shows the A-finale-grænse tile', async () => {
+  vi.spyOn(dc, 'getRace').mockResolvedValue(raceJson)
+  render(Race, { params: { cat: 'DM-L', meetId: 'M2026', raceKey: 'M-100-Fri-LCM' } })
+  await waitFor(() => expect(screen.getByText(raceJson.podium[0].name)).toBeInTheDocument())
+  expect(screen.getByText('A-finale-grænse')).toBeInTheDocument()
+})
