@@ -166,11 +166,28 @@ _RELAY_RACES_SQL = """
     ORDER BY gender, distance, stroke, course, relay_count
 """
 
+# Junior race list for a combined DMJ-L meet: individual events sourced from
+# junior_championship (juniors ranked by qualifying swim). Events with no juniors
+# produce no rows and so drop from the list — and, via build_all, get no detail file.
+_JUNIOR_RACES_SQL = """
+    SELECT gender, distance, stroke, course,
+           count(DISTINCT swimmer_id) AS contestants,
+           arg_min(name, completed_centiseconds) AS winner_name,
+           arg_min(completed_time, completed_centiseconds) AS winning_time
+    FROM junior_championship
+    WHERE meet_id = ?
+    GROUP BY gender, distance, stroke, course
+    ORDER BY gender, distance, stroke, course
+"""
+
 
 def build_races(con, category: str, meet_id: str) -> dict:
+    combined_junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
+    ind_sql = _JUNIOR_RACES_SQL if combined_junior else _RACES_SQL
+    ind_args = [meet_id] if combined_junior else [category, meet_id]
     races = []
     for gender, distance, stroke, course, contestants, winner, wtime in con.execute(
-            _RACES_SQL, [category, meet_id]).fetchall():
+            ind_sql, ind_args).fetchall():
         races.append({
             "race_key": race_key(gender, distance, stroke, course),
             "label": f"{gender} {distance}m {stroke}",

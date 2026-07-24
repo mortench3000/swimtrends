@@ -554,6 +554,28 @@ def test_combined_dmjl_graphs_reflect_juniors_only():
     assert row["top8_avg_cs"] is not None
 
 
+def test_combined_dmjl_race_list_is_junior_scoped():
+    from tests.webbuild_fixtures import combined_con
+    con = combined_con()
+    # DM-L list: both events, senior winners
+    dm = {r["race_key"]: r for r in queries.build_races(con, "DM-L", "C2026")["races"]}
+    assert dm["M-100-Fri-LCM"]["winner_name"] == "Senior Ace"
+    assert "F-200-Ryg-LCM" in dm                         # seniors-only event listed
+    # DMJ-L list: junior winner/count on the junior event, seniors-only event dropped
+    jr = {r["race_key"]: r for r in queries.build_races(con, "DMJ-L", "C2026")["races"]}
+    assert jr["M-100-Fri-LCM"]["winner_name"] == "Junior Fast"
+    assert jr["M-100-Fri-LCM"]["contestants"] == 4
+    assert "F-200-Ryg-LCM" not in jr                     # no juniors -> not listed
+
+
+def test_noncombined_dmjl_race_list_unchanged():
+    from tests.webbuild_fixtures import junior_only_con
+    out = queries.build_races(junior_only_con(), "DMJ-L", "J2026")
+    fri = [r for r in out["races"] if r["race_key"] == "M-100-Fri-LCM"][0]
+    assert fri["winner_name"] == "Ung Anna"              # from the final, unchanged path
+    assert fri["contestants"] == 11                      # full field (3 + 8 heat fillers)
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 

@@ -129,6 +129,11 @@ def combined_con() -> duckdb.DuckDBPyConnection:
                    ("cj4", "Junior Last", "AGF", 5850, season - 17)]
         obt += _combined_event(mid, name, season, mdate, "M", 100, "Fri",
                                seniors + fillers, juniors)
+        seniors_ryg = [("rs1", "Ryg Senior A", "AGF", 13000, 2000),
+                       ("rs2", "Ryg Senior B", "SIGMA", 13100, 2000),
+                       ("rs3", "Ryg Senior C", "VEST", 13200, 2000)]
+        obt += _combined_event(mid, name, season, mdate, "F", 200, "Ryg",
+                               seniors_ryg, [])          # no juniors in this event
     con = duckdb.connect()
     build_curated(con, obt=obt, meets=meets, splits=[])
     create_views(con)
