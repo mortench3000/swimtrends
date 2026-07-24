@@ -135,6 +135,23 @@ def combined_con() -> duckdb.DuckDBPyConnection:
     return con
 
 
+def junior_only_con() -> duckdb.DuckDBPyConnection:
+    """A DMJ-L meet NOT combined with any senior category: juniors race their own
+    heats + final, medals from the final. webbuild must leave this untouched
+    (junior_scoped == False, all senior-structure tiles present)."""
+    mid, name, season, mdate = "J2026", "Junior Champs 2026", 2026, "2026-04-10"
+    meets = [dict(meet_id=mid, meet_name=name, venue="Aarhus", course="LCM",
+                  season=season, meet_date=mdate, category=["DMJ-L"])]
+    rows, _ = _event(mid, name, season, mdate, "M", 100, "Fri",
+                     [("j1", "Ung Anna", "AGF", 5600),
+                      ("j2", "Ung Bo", "SIGMA", 5650),
+                      ("j3", "Ung Cara", "VEST", 5700)], start_rid=1)
+    con = duckdb.connect()
+    build_curated(con, obt=rows, meets=meets, splits=[])
+    create_views(con)
+    return con
+
+
 def relay_con() -> duckdb.DuckDBPyConnection:
     """A DM-L meet in 2025 + 2026 with individual AND relay events, so relay
     queries and the individual aggregates are exercised side by side. Separate

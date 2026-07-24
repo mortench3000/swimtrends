@@ -314,16 +314,48 @@ _JUNIOR_PODIUM_SQL = """
     ORDER BY junior_rank
 """
 
+_JUNIOR_FACTS_SQL = """
+    WITH j AS (
+        SELECT * FROM junior_championship
+        WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+    )
+    SELECT
+        (SELECT count(DISTINCT swimmer_id) FROM j) AS contestants,
+        (SELECT arg_min(completed_time, completed_centiseconds) FROM j) AS winning_time,
+        (SELECT arg_min(points, completed_centiseconds) FROM j) AS winner_points,
+        (SELECT CAST(quantile_cont(completed_centiseconds, 0.5) AS BIGINT) FROM j) AS median_cs,
+        (SELECT CAST(quantile_cont(points, 0.5) AS BIGINT) FROM j) AS median_points,
+        (SELECT max(completed_centiseconds) - min(completed_centiseconds) FROM j) AS spread_1_last_cs
+"""
+
+# Junior DQs: base `results` carries is_junior + is_dq (analytics/views/00_base.sql);
+# junior_championship excludes DQ rows, so count them here instead.
+_JUNIOR_DSQ_SQL = """
+    SELECT count(*) FROM results
+    WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+      AND is_dq AND NOT is_relay AND is_junior AND class = 'open'
+"""
+
 
 def _build_junior_race(con, meet_id, gender, distance, stroke, course) -> dict:
     args = [meet_id, gender, distance, stroke, course]
+    fact_cols = ["contestants", "winning_time", "winner_points",
+                 "median_cs", "median_points", "spread_1_last_cs"]
+    facts = dict(zip(fact_cols, con.execute(_JUNIOR_FACTS_SQL, args).fetchone()))
+    facts["dsq"] = con.execute(_JUNIOR_DSQ_SQL, args).fetchone()[0]
+    # These describe the senior heats->final structure a combined-meet junior
+    # championship has no equivalent for; Race.svelte drops them via junior_scoped.
+    facts["cutline_centiseconds"] = None
+    facts["cutline_time"] = None
+    facts["spread_1_8_cs"] = None
+    facts["juniors"] = None
     podium = [dict(zip(["rank", "name", "swimmer_id", "club", "time", "points"], r))
               for r in con.execute(_JUNIOR_PODIUM_SQL, args).fetchall()]
     return {"category": "DMJ-L", "meet_id": meet_id,
             "race_key": race_key(gender, distance, stroke, course),
             "label": f"{gender} {distance}m {stroke}",
             "is_relay": False, "junior_scoped": True,
-            "facts": {}, "podium": podium, "season_comparison": []}
+            "facts": facts, "podium": podium, "season_comparison": []}
 
 
 def _build_relay_race(con, category, meet_id, gender, distance, stroke, course, relay_count) -> dict:
@@ -347,7 +379,7 @@ def _build_relay_race(con, category, meet_id, gender, distance, stroke, course, 
     return {"category": category, "meet_id": meet_id,
             "race_key": race_key(gender, distance, stroke, course, relay_count),
             "label": f"{gender} {relay_count}x{distance}m {stroke}",
-            "is_relay": True, "facts": facts, "podium": podium,
+            "is_relay": True, "junior_scoped": False, "facts": facts, "podium": podium,
             "season_comparison": comp}
 
 
