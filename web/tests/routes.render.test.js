@@ -10,6 +10,32 @@ import raceJson from './fixtures/race.json'
 
 beforeEach(() => { dc._resetCache() })
 
+const juniorMeet = {
+  category: 'DMJ-L', meet_id: 'C2026', meet_name: 'Combined Champs 2026',
+  meet_date: '2026-04-10', season: 2026, junior_scoped: true,
+  facts: { swims: 4, entrants: 4, events: 1, clubs: 3, juniors: 4,
+           median_points: 500, top_points: 500, elite_median_points: 500 },
+  season_comparison: [{ season: 2026, entrants: 4, events: 1, clubs: 3,
+                        median_points: 500, top_points: 500, elite_median_points: 500 }],
+}
+
+test('junior-scoped meet hides the redundant Juniorer tile', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(juniorMeet)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  render(Meet, { params: { cat: 'DMJ-L', meetId: 'C2026' } })
+  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Combined Champs 2026' })).toBeInTheDocument())
+  expect(screen.queryByText('Juniorer')).toBeNull()
+  expect(screen.getByText('Deltagere')).toBeInTheDocument()   // kept
+})
+
+test('ordinary meet still shows the Juniorer tile', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: meetJson.meet_name })).toBeInTheDocument())
+  expect(screen.getByText('Juniorer')).toBeInTheDocument()
+})
+
 test('Meet renders facts and a race link', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
