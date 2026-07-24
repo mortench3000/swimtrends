@@ -576,6 +576,32 @@ def test_noncombined_dmjl_race_list_unchanged():
     assert fri["contestants"] == 11                      # full field (3 + 8 heat fillers)
 
 
+def test_combined_dmjl_meet_header_is_junior_scoped():
+    from tests.webbuild_fixtures import combined_con
+    out = queries.build_meet(combined_con(), "DMJ-L", "C2026")
+    assert out["junior_scoped"] is True
+    f = out["facts"]
+    assert f["entrants"] == 4               # four juniors, not the full senior field
+    assert f["events"] == 1                 # only M-100-Fri has juniors (F-200-Ryg dropped)
+    assert f["top_points"] == 500           # fixture points are uniform 500
+    comp_seasons = [c["season"] for c in out["season_comparison"]]
+    assert comp_seasons == [2026, 2025]
+    assert all(c["entrants"] == 4 for c in out["season_comparison"])
+
+
+def test_noncombined_dmjl_meet_header_unchanged():
+    from tests.webbuild_fixtures import junior_only_con
+    out = queries.build_meet(junior_only_con(), "DMJ-L", "J2026")
+    assert out["junior_scoped"] is False
+    assert out["facts"]["entrants"] == 11   # full field, unchanged path
+
+
+def test_dml_meet_header_unchanged():
+    out = queries.build_meet(curated_con(), "DM-L", "M2026")
+    assert out["junior_scoped"] is False
+    assert out["facts"]["entrants"] == 22
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 

@@ -56,6 +56,54 @@ _MEET_ELITE_SQL = """
 """
 
 
+_JUNIOR_MEET_FACTS_SQL = """
+    SELECT count(*) AS swims,
+           count(DISTINCT swimmer_id) AS entrants,
+           count(DISTINCT (gender, distance, stroke, course)) AS events,
+           count(DISTINCT club) AS clubs,
+           count(DISTINCT swimmer_id) AS juniors,
+           CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
+           max(points) AS top_points
+    FROM junior_championship
+    WHERE meet_id = ?
+"""
+
+_JUNIOR_MEET_COMPARE_SQL = """
+    SELECT season,
+           count(DISTINCT swimmer_id) AS entrants,
+           count(DISTINCT (gender, distance, stroke, course)) AS events,
+           count(DISTINCT club) AS clubs,
+           CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
+           max(points) AS top_points
+    FROM junior_championship
+    WHERE season <= ?
+    GROUP BY season
+    ORDER BY season DESC
+    LIMIT 5
+"""
+
+_JUNIOR_MEET_ELITE_SQL = """
+    WITH best AS (
+        SELECT season, gender, distance, stroke, course, swimmer_id,
+               max(points) AS pts
+        FROM junior_championship
+        WHERE season <= ? AND points IS NOT NULL AND swimmer_id IS NOT NULL
+        GROUP BY season, gender, distance, stroke, course, swimmer_id
+    ),
+    ranked AS (
+        SELECT season, pts,
+               row_number() OVER (
+                   PARTITION BY season, gender, distance, stroke, course
+                   ORDER BY pts DESC) AS rk
+        FROM best
+    )
+    SELECT season, CAST(quantile_cont(pts, 0.5) AS BIGINT) AS elite_median_points
+    FROM ranked
+    WHERE rk <= 10
+    GROUP BY season
+"""
+
+
 def build_index(con) -> dict:
     rows = con.execute(
         "SELECT category, list(DISTINCT season ORDER BY season DESC) AS seasons "
@@ -112,6 +160,7 @@ def build_meets(con, category: str) -> dict:
 
 
 def build_meet(con, category: str, meet_id: str) -> dict:
+    combined_junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
     head = con.execute(
         "SELECT any_value(meet_name), any_value(meet_date), any_value(season) "
         "FROM results_by_category WHERE category = ? AND meet_id = ?",
@@ -119,17 +168,27 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     ).fetchone()
     fact_cols = ["swims", "entrants", "events", "clubs", "juniors",
                  "median_points", "top_points"]
-    facts = dict(zip(fact_cols, con.execute(
-        _MEET_FACTS_SQL, [category, meet_id]).fetchone()))
+    if combined_junior:
+        facts = dict(zip(fact_cols, con.execute(
+            _JUNIOR_MEET_FACTS_SQL, [meet_id]).fetchone()))
+    else:
+        facts = dict(zip(fact_cols, con.execute(
+            _MEET_FACTS_SQL, [category, meet_id]).fetchone()))
     comp_cols = ["season", "entrants", "events", "clubs", "median_points", "top_points"]
-    comp = [dict(zip(comp_cols, r)) for r in con.execute(
-        _MEET_COMPARE_SQL, [category, head[2]]).fetchall()]
+    if combined_junior:
+        comp = [dict(zip(comp_cols, r)) for r in con.execute(
+            _JUNIOR_MEET_COMPARE_SQL, [head[2]]).fetchall()]
+        elite = dict(con.execute(_JUNIOR_MEET_ELITE_SQL, [head[2]]).fetchall())
+    else:
+        comp = [dict(zip(comp_cols, r)) for r in con.execute(
+            _MEET_COMPARE_SQL, [category, head[2]]).fetchall()]
+        elite = dict(con.execute(_MEET_ELITE_SQL, [category, head[2]]).fetchall())
     # Elite (top-10-per-event) median points, keyed by season, merged into the
     # facts (this meet's season) and each comparison row.
-    elite = dict(con.execute(_MEET_ELITE_SQL, [category, head[2]]).fetchall())
     facts["elite_median_points"] = elite.get(head[2])
     for c in comp:
         c["elite_median_points"] = elite.get(c["season"])
+    # Relay events stay senior-scoped (no junior-relay title); added on top as today.
     facts["events"] += con.execute(
         _MEET_RELAY_EVENTS_SQL, [category, meet_id]).fetchone()[0]
     rel_by_season = dict(con.execute(
@@ -137,7 +196,7 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     for c in comp:
         c["events"] += rel_by_season.get(c["season"], 0)
     return {"category": category, "meet_id": meet_id, "meet_name": head[0],
-            "meet_date": head[1], "season": head[2],
+            "meet_date": head[1], "season": head[2], "junior_scoped": combined_junior,
             "facts": facts, "season_comparison": comp}
 
 
