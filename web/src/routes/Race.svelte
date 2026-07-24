@@ -11,9 +11,8 @@
   // props: { params: { cat, meetId, raceKey } }
   let { params = {} } = $props()
 
-  const jr = $derived(race?.junior_scoped === true)
-
   let race = $state(null)
+  const jr = $derived(race?.junior_scoped === true)
   let loading = $state(true)
   let err = $state(null)
 

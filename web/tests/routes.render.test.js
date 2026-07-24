@@ -114,6 +114,7 @@ test('junior-scoped race hides senior-structure tiles', async () => {
   expect(screen.queryByText('Spredning 1.–8.')).toBeNull()
   expect(screen.queryByText('Juniorer')).toBeNull()
   expect(screen.getByText('Deltagere')).toBeInTheDocument()   // kept
+  expect(screen.queryByText(/A-finale-grænse pr\. sæson/)).toBeNull()   // cutline chart hidden
 })
 
 test('non-junior race still shows the A-finale-grænse tile', async () => {
@@ -121,4 +122,5 @@ test('non-junior race still shows the A-finale-grænse tile', async () => {
   render(Race, { params: { cat: 'DM-L', meetId: 'M2026', raceKey: 'M-100-Fri-LCM' } })
   await waitFor(() => expect(screen.getByText(raceJson.podium[0].name)).toBeInTheDocument())
   expect(screen.getByText('A-finale-grænse')).toBeInTheDocument()
+  expect(screen.getByText(/A-finale-grænse pr\. sæson/)).toBeInTheDocument()   // cutline chart shown
 })
