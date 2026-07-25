@@ -56,6 +56,54 @@ _MEET_ELITE_SQL = """
 """
 
 
+_JUNIOR_MEET_FACTS_SQL = """
+    SELECT count(*) AS swims,
+           count(DISTINCT swimmer_id) AS entrants,
+           count(DISTINCT (gender, distance, stroke, course)) AS events,
+           count(DISTINCT club) AS clubs,
+           count(DISTINCT swimmer_id) AS juniors,
+           CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
+           max(points) AS top_points
+    FROM junior_championship
+    WHERE meet_id = ?
+"""
+
+_JUNIOR_MEET_COMPARE_SQL = """
+    SELECT season,
+           count(DISTINCT swimmer_id) AS entrants,
+           count(DISTINCT (gender, distance, stroke, course)) AS events,
+           count(DISTINCT club) AS clubs,
+           CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
+           max(points) AS top_points
+    FROM junior_championship
+    WHERE season <= ?
+    GROUP BY season
+    ORDER BY season DESC
+    LIMIT 5
+"""
+
+_JUNIOR_MEET_ELITE_SQL = """
+    WITH best AS (
+        SELECT season, gender, distance, stroke, course, swimmer_id,
+               max(points) AS pts
+        FROM junior_championship
+        WHERE season <= ? AND points IS NOT NULL AND swimmer_id IS NOT NULL
+        GROUP BY season, gender, distance, stroke, course, swimmer_id
+    ),
+    ranked AS (
+        SELECT season, pts,
+               row_number() OVER (
+                   PARTITION BY season, gender, distance, stroke, course
+                   ORDER BY pts DESC) AS rk
+        FROM best
+    )
+    SELECT season, CAST(quantile_cont(pts, 0.5) AS BIGINT) AS elite_median_points
+    FROM ranked
+    WHERE rk <= 10
+    GROUP BY season
+"""
+
+
 def build_index(con) -> dict:
     rows = con.execute(
         "SELECT category, list(DISTINCT season ORDER BY season DESC) AS seasons "
@@ -112,6 +160,7 @@ def build_meets(con, category: str) -> dict:
 
 
 def build_meet(con, category: str, meet_id: str) -> dict:
+    combined_junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
     head = con.execute(
         "SELECT any_value(meet_name), any_value(meet_date), any_value(season) "
         "FROM results_by_category WHERE category = ? AND meet_id = ?",
@@ -119,17 +168,27 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     ).fetchone()
     fact_cols = ["swims", "entrants", "events", "clubs", "juniors",
                  "median_points", "top_points"]
-    facts = dict(zip(fact_cols, con.execute(
-        _MEET_FACTS_SQL, [category, meet_id]).fetchone()))
+    if combined_junior:
+        facts = dict(zip(fact_cols, con.execute(
+            _JUNIOR_MEET_FACTS_SQL, [meet_id]).fetchone()))
+    else:
+        facts = dict(zip(fact_cols, con.execute(
+            _MEET_FACTS_SQL, [category, meet_id]).fetchone()))
     comp_cols = ["season", "entrants", "events", "clubs", "median_points", "top_points"]
-    comp = [dict(zip(comp_cols, r)) for r in con.execute(
-        _MEET_COMPARE_SQL, [category, head[2]]).fetchall()]
+    if combined_junior:
+        comp = [dict(zip(comp_cols, r)) for r in con.execute(
+            _JUNIOR_MEET_COMPARE_SQL, [head[2]]).fetchall()]
+        elite = dict(con.execute(_JUNIOR_MEET_ELITE_SQL, [head[2]]).fetchall())
+    else:
+        comp = [dict(zip(comp_cols, r)) for r in con.execute(
+            _MEET_COMPARE_SQL, [category, head[2]]).fetchall()]
+        elite = dict(con.execute(_MEET_ELITE_SQL, [category, head[2]]).fetchall())
     # Elite (top-10-per-event) median points, keyed by season, merged into the
     # facts (this meet's season) and each comparison row.
-    elite = dict(con.execute(_MEET_ELITE_SQL, [category, head[2]]).fetchall())
     facts["elite_median_points"] = elite.get(head[2])
     for c in comp:
         c["elite_median_points"] = elite.get(c["season"])
+    # Relay events stay senior-scoped (no junior-relay title); added on top as today.
     facts["events"] += con.execute(
         _MEET_RELAY_EVENTS_SQL, [category, meet_id]).fetchone()[0]
     rel_by_season = dict(con.execute(
@@ -137,7 +196,7 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     for c in comp:
         c["events"] += rel_by_season.get(c["season"], 0)
     return {"category": category, "meet_id": meet_id, "meet_name": head[0],
-            "meet_date": head[1], "season": head[2],
+            "meet_date": head[1], "season": head[2], "junior_scoped": combined_junior,
             "facts": facts, "season_comparison": comp}
 
 
@@ -166,11 +225,28 @@ _RELAY_RACES_SQL = """
     ORDER BY gender, distance, stroke, course, relay_count
 """
 
+# Junior race list for a combined DMJ-L meet: individual events sourced from
+# junior_championship (juniors ranked by qualifying swim). Events with no juniors
+# produce no rows and so drop from the list — and, via build_all, get no detail file.
+_JUNIOR_RACES_SQL = """
+    SELECT gender, distance, stroke, course,
+           count(DISTINCT swimmer_id) AS contestants,
+           arg_min(name, completed_centiseconds) AS winner_name,
+           arg_min(completed_time, completed_centiseconds) AS winning_time
+    FROM junior_championship
+    WHERE meet_id = ?
+    GROUP BY gender, distance, stroke, course
+    ORDER BY gender, distance, stroke, course
+"""
+
 
 def build_races(con, category: str, meet_id: str) -> dict:
+    combined_junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
+    ind_sql = _JUNIOR_RACES_SQL if combined_junior else _RACES_SQL
+    ind_args = [meet_id] if combined_junior else [category, meet_id]
     races = []
     for gender, distance, stroke, course, contestants, winner, wtime in con.execute(
-            _RACES_SQL, [category, meet_id]).fetchall():
+            ind_sql, ind_args).fetchall():
         races.append({
             "race_key": race_key(gender, distance, stroke, course),
             "label": f"{gender} {distance}m {stroke}",
@@ -291,6 +367,102 @@ _RELAY_RACE_COMPARE_SQL = """
 """
 
 
+def _meet_is_combined(con, meet_id) -> bool:
+    """True when the meet is tagged with a senior (non-junior) category alongside a
+    junior one. At such a meet juniors have no separate final, so the junior title
+    comes from the qualifying swim (see analytics/views/60_junior.sql). Detected via
+    the raw category list on cur_dim_meet: needs both a tag not starting with 'DMJ'
+    (a senior tag) and a tag starting with 'DMJ' (a junior tag)."""
+    row = con.execute(
+        "SELECT category FROM cur_dim_meet WHERE meet_id = ?", [meet_id]).fetchone()
+    if not row:
+        return False
+    cats = row[0]
+    return (any(not c.startswith("DMJ") for c in cats)
+            and any(c.startswith("DMJ") for c in cats))
+
+
+_JUNIOR_PODIUM_SQL = """
+    SELECT junior_rank AS rank, name, swimmer_id, club, completed_time AS time, points
+    FROM junior_championship
+    WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+      AND junior_rank IN (1, 2, 3)
+    ORDER BY junior_rank
+"""
+
+_JUNIOR_FACTS_SQL = """
+    WITH j AS (
+        SELECT * FROM junior_championship
+        WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+    )
+    SELECT
+        (SELECT count(DISTINCT swimmer_id) FROM j) AS contestants,
+        (SELECT arg_min(completed_time, completed_centiseconds) FROM j) AS winning_time,
+        (SELECT arg_min(points, completed_centiseconds) FROM j) AS winner_points,
+        (SELECT CAST(quantile_cont(completed_centiseconds, 0.5) AS BIGINT) FROM j) AS median_cs,
+        (SELECT CAST(quantile_cont(points, 0.5) AS BIGINT) FROM j) AS median_points,
+        (SELECT max(completed_centiseconds) - min(completed_centiseconds) FROM j) AS spread_1_last_cs
+"""
+
+# Junior DQs: base `results` carries is_junior + is_dq (analytics/views/00_base.sql);
+# junior_championship excludes DQ rows, so count them here instead.
+_JUNIOR_DSQ_SQL = """
+    SELECT count(*) FROM results
+    WHERE meet_id = ? AND gender = ? AND distance = ? AND stroke = ? AND course = ?
+      AND is_dq AND NOT is_relay AND is_junior AND class = 'open'
+"""
+
+# Per-season junior standard for the trend charts. Aggregates junior_championship
+# (qualifying swims across all DMJ-L meets) for the event. Same window as
+# _RACE_COMPARE_SQL: seasons <= the meet's, newest 5. No cutline (no junior final).
+_JUNIOR_COMPARE_SQL = """
+    WITH j AS (
+        SELECT season, completed_centiseconds,
+               row_number() OVER (PARTITION BY season ORDER BY completed_centiseconds) AS rn
+        FROM junior_championship
+        WHERE gender = ? AND distance = ? AND stroke = ? AND course = ? AND season <= ?
+    )
+    SELECT season,
+           min(completed_centiseconds) AS best_cs,
+           CAST(quantile_cont(completed_centiseconds, 0.5) AS BIGINT) AS median_cs,
+           CAST(avg(completed_centiseconds) FILTER (WHERE rn <= 8) AS BIGINT) AS top8_avg_cs,
+           NULL AS cutline_cs,
+           count(*) AS swims
+    FROM j
+    GROUP BY season
+    ORDER BY season DESC
+    LIMIT 5
+"""
+
+
+def _build_junior_race(con, meet_id, gender, distance, stroke, course) -> dict:
+    args = [meet_id, gender, distance, stroke, course]
+    fact_cols = ["contestants", "winning_time", "winner_points",
+                 "median_cs", "median_points", "spread_1_last_cs"]
+    facts = dict(zip(fact_cols, con.execute(_JUNIOR_FACTS_SQL, args).fetchone()))
+    facts["dsq"] = con.execute(_JUNIOR_DSQ_SQL, args).fetchone()[0]
+    # These describe the senior heats->final structure a combined-meet junior
+    # championship has no equivalent for; Race.svelte drops them via junior_scoped.
+    facts["cutline_centiseconds"] = None
+    facts["cutline_time"] = None
+    facts["spread_1_8_cs"] = None
+    facts["juniors"] = None
+    podium = [dict(zip(["rank", "name", "swimmer_id", "club", "time", "points"], r))
+              for r in con.execute(_JUNIOR_PODIUM_SQL, args).fetchall()]
+    season = con.execute(
+        "SELECT any_value(season) FROM junior_championship WHERE meet_id = ?",
+        [meet_id]).fetchone()[0]
+    comp_cols = ["season", "best_cs", "median_cs", "top8_avg_cs", "cutline_cs", "swims"]
+    comp = [dict(zip(comp_cols, r)) for r in con.execute(
+        _JUNIOR_COMPARE_SQL,
+        [gender, distance, stroke, course, season]).fetchall()]
+    return {"category": "DMJ-L", "meet_id": meet_id,
+            "race_key": race_key(gender, distance, stroke, course),
+            "label": f"{gender} {distance}m {stroke}",
+            "is_relay": False, "junior_scoped": True,
+            "facts": facts, "podium": podium, "season_comparison": comp}
+
+
 def _build_relay_race(con, category, meet_id, gender, distance, stroke, course, relay_count) -> dict:
     args = [category, meet_id, gender, distance, stroke, course, relay_count]
     fact_cols = ["contestants", "winning_time", "winner_points",
@@ -312,13 +484,15 @@ def _build_relay_race(con, category, meet_id, gender, distance, stroke, course, 
     return {"category": category, "meet_id": meet_id,
             "race_key": race_key(gender, distance, stroke, course, relay_count),
             "label": f"{gender} {relay_count}x{distance}m {stroke}",
-            "is_relay": True, "facts": facts, "podium": podium,
+            "is_relay": True, "junior_scoped": False, "facts": facts, "podium": podium,
             "season_comparison": comp}
 
 
 def build_race(con, category, meet_id, gender, distance, stroke, course, relay_count=1) -> dict:
     if relay_count > 1:
         return _build_relay_race(con, category, meet_id, gender, distance, stroke, course, relay_count)
+    if category == "DMJ-L" and _meet_is_combined(con, meet_id):
+        return _build_junior_race(con, meet_id, gender, distance, stroke, course)
     args = [category, meet_id, gender, distance, stroke, course]
     fact_cols = ["contestants", "winning_time", "winner_points",
                  "cutline_centiseconds", "spread_1_8_cs", "spread_1_last_cs",
@@ -343,5 +517,5 @@ def build_race(con, category, meet_id, gender, distance, stroke, course, relay_c
     return {"category": category, "meet_id": meet_id,
             "race_key": race_key(gender, distance, stroke, course),
             "label": f"{gender} {distance}m {stroke}",
-            "is_relay": False,
+            "is_relay": False, "junior_scoped": False,
             "facts": facts, "podium": podium, "season_comparison": comp}

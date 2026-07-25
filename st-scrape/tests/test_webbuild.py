@@ -488,6 +488,120 @@ def test_build_race_individual_flagged_not_relay():
     assert out["is_relay"] is False
 
 
+def test_combined_dmjl_podium_is_junior_not_senior():
+    from tests.webbuild_fixtures import combined_con
+    con = combined_con()
+    # senior page: unchanged, senior final podium
+    dm = queries.build_race(con, "DM-L", "C2026", "M", 100, "Fri", "LCM")
+    assert [p["name"] for p in dm["podium"]] == ["Senior Ace", "Senior Two", "Senior Three"]
+    assert dm["junior_scoped"] is False
+    # junior page: junior championship podium (heat times), different swimmers
+    jr = queries.build_race(con, "DMJ-L", "C2026", "M", 100, "Fri", "LCM")
+    assert jr["junior_scoped"] is True
+    assert [p["rank"] for p in jr["podium"]] == [1, 2, 3]
+    assert [p["name"] for p in jr["podium"]] == ["Junior Fast", "Junior Mid", "Junior Slow"]
+    assert jr["podium"][0]["swimmer_id"] == "cj1"      # profile link
+    assert jr["podium"][0]["time"] == "0:57.00"        # 5700 cs, the qualifying swim
+    assert jr["race_key"] == "M-100-Fri-LCM"
+    assert jr["label"] == "M 100m Fri"
+
+
+def test_meet_is_combined_detects_senior_tag():
+    from tests.webbuild_fixtures import combined_con, curated_con
+    assert queries._meet_is_combined(combined_con(), "C2026") is True
+    assert queries._meet_is_combined(curated_con(), "M2026") is False   # DM-L only
+
+
+def test_combined_dmjl_facts_are_junior_scoped():
+    from tests.webbuild_fixtures import combined_con
+    jr = queries.build_race(combined_con(), "DMJ-L", "C2026", "M", 100, "Fri", "LCM")
+    f = jr["facts"]
+    assert f["contestants"] == 4                 # four juniors, not the senior field
+    assert f["winning_time"] == "0:57.00"        # junior gold qualifying swim (5700)
+    assert f["median_cs"] == 5775                # median(5700,5750,5800,5850)
+    assert f["spread_1_last_cs"] == 150          # 5850 - 5700
+    # senior heats->final tiles do not apply to a junior championship: dropped
+    assert f["cutline_centiseconds"] is None
+    assert f["spread_1_8_cs"] is None
+    assert f["juniors"] is None
+
+
+def test_combined_dmjl_dsq_is_junior_scoped():
+    from tests.webbuild_fixtures import combined_con
+    jr = queries.build_race(combined_con(), "DMJ-L", "C2026", "M", 100, "Fri", "LCM")
+    assert jr["facts"]["dsq"] == 0               # no DQ rows in the fixture
+
+
+def test_noncombined_dmjl_is_unchanged():
+    from tests.webbuild_fixtures import junior_only_con
+    out = queries.build_race(junior_only_con(), "DMJ-L", "J2026", "M", 100, "Fri", "LCM")
+    assert out["junior_scoped"] is False
+    assert out["facts"]["cutline_centiseconds"] is not None    # real junior final
+    assert out["facts"]["juniors"] is not None
+    assert [p["rank"] for p in out["podium"]] == [1, 2, 3]
+    assert out["podium"][0]["name"] == "Ung Anna"              # from the final
+
+
+def test_combined_dmjl_graphs_reflect_juniors_only():
+    from tests.webbuild_fixtures import combined_con
+    jr = queries.build_race(combined_con(), "DMJ-L", "C2026", "M", 100, "Fri", "LCM")
+    comp = jr["season_comparison"]
+    assert [c["season"] for c in comp] == [2026, 2025]     # newest first, both seasons
+    row = comp[0]
+    assert row["best_cs"] == 5700          # fastest junior qualifying swim, not senior
+    assert row["swims"] == 4               # four juniors, not the full field
+    assert row["cutline_cs"] is None       # no junior final -> no cutline curve
+    assert row["top8_avg_cs"] is not None
+
+
+def test_combined_dmjl_race_list_is_junior_scoped():
+    from tests.webbuild_fixtures import combined_con
+    con = combined_con()
+    # DM-L list: both events, senior winners
+    dm = {r["race_key"]: r for r in queries.build_races(con, "DM-L", "C2026")["races"]}
+    assert dm["M-100-Fri-LCM"]["winner_name"] == "Senior Ace"
+    assert "F-200-Ryg-LCM" in dm                         # seniors-only event listed
+    # DMJ-L list: junior winner/count on the junior event, seniors-only event dropped
+    jr = {r["race_key"]: r for r in queries.build_races(con, "DMJ-L", "C2026")["races"]}
+    assert jr["M-100-Fri-LCM"]["winner_name"] == "Junior Fast"
+    assert jr["M-100-Fri-LCM"]["contestants"] == 4
+    assert "F-200-Ryg-LCM" not in jr                     # no juniors -> not listed
+
+
+def test_noncombined_dmjl_race_list_unchanged():
+    from tests.webbuild_fixtures import junior_only_con
+    out = queries.build_races(junior_only_con(), "DMJ-L", "J2026")
+    fri = [r for r in out["races"] if r["race_key"] == "M-100-Fri-LCM"][0]
+    assert fri["winner_name"] == "Ung Anna"              # from the final, unchanged path
+    assert fri["contestants"] == 11                      # full field (3 + 8 heat fillers)
+
+
+def test_combined_dmjl_meet_header_is_junior_scoped():
+    from tests.webbuild_fixtures import combined_con
+    out = queries.build_meet(combined_con(), "DMJ-L", "C2026")
+    assert out["junior_scoped"] is True
+    f = out["facts"]
+    assert f["entrants"] == 4               # four juniors, not the full senior field
+    assert f["events"] == 1                 # only M-100-Fri has juniors (F-200-Ryg dropped)
+    assert f["top_points"] == 500           # fixture points are uniform 500
+    comp_seasons = [c["season"] for c in out["season_comparison"]]
+    assert comp_seasons == [2026, 2025]
+    assert all(c["entrants"] == 4 for c in out["season_comparison"])
+
+
+def test_noncombined_dmjl_meet_header_unchanged():
+    from tests.webbuild_fixtures import junior_only_con
+    out = queries.build_meet(junior_only_con(), "DMJ-L", "J2026")
+    assert out["junior_scoped"] is False
+    assert out["facts"]["entrants"] == 11   # full field, unchanged path
+
+
+def test_dml_meet_header_unchanged():
+    out = queries.build_meet(curated_con(), "DM-L", "M2026")
+    assert out["junior_scoped"] is False
+    assert out["facts"]["entrants"] == 22
+
+
 def test_build_all_writes_full_tree(tmp_path: Path):
     from webbuild import build
 

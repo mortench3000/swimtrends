@@ -12,6 +12,7 @@
   let { params = {} } = $props()
 
   let meet = $state(null)
+  const jr = $derived(meet?.junior_scoped === true)
   let races = $state(null)
   let loading = $state(true)
   let err = $state(null)
@@ -67,7 +68,7 @@
             value: formatInt(meet.facts.clubs),
             delta: formatDelta(meet.facts.clubs, prev?.clubs),
           },
-          { label: 'Juniorer', value: formatInt(meet.facts.juniors) },
+          ...(jr ? [] : [{ label: 'Juniorer', value: formatInt(meet.facts.juniors) }]),
           {
             label: 'Median point',
             value: formatPoints(meet.facts.median_points),

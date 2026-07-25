@@ -75,6 +75,88 @@ def _relay_event(meet_id, meet_name, season, meet_date, gender, distance, stroke
     return rows, rid
 
 
+def _combined_event(meet_id, meet_name, season, meet_date, gender, distance, stroke,
+                    finalists, heat_only):
+    """Combined senior+junior event. finalists: (sid, name, club, final_cs, birth_year)
+    -> heats (final_cs+50) AND final. heat_only: (sid, name, club, heat_cs, birth_year)
+    -> heats only, e.g. juniors who never reach the senior final. Returns rows."""
+    rows = []
+    rid = 0
+    field = [(sid, name, club, cs + 50, by) for sid, name, club, cs, by in finalists]
+    field += list(heat_only)
+    for i, (sid, name, club, cs, by) in enumerate(sorted(field, key=lambda x: x[3]), 1):
+        rid += 1
+        rows.append(_obt_row(
+            result_id=f"{meet_id}-h-{rid}", race_id=rid, meet_id=meet_id,
+            rank=i, name=name, swimmer_id=sid, club=club, birth_year=by,
+            completed_time=f"{cs//6000}:{(cs%6000)//100:02d}.{cs%100:02d}",
+            completed_centiseconds=cs, season=season, meet_name=meet_name,
+            meet_date=meet_date, distance=distance, stroke=stroke, gender=gender,
+            type="Heats"))
+    for i, (sid, name, club, cs, by) in enumerate(sorted(finalists, key=lambda x: x[3]), 1):
+        rid += 1
+        rows.append(_obt_row(
+            result_id=f"{meet_id}-f-{rid}", race_id=rid, meet_id=meet_id,
+            rank=i, name=name, swimmer_id=sid, club=club, birth_year=by,
+            completed_time=f"{cs//6000}:{(cs%6000)//100:02d}.{cs%100:02d}",
+            completed_centiseconds=cs, season=season, meet_name=meet_name,
+            meet_date=meet_date, distance=distance, stroke=stroke, gender=gender,
+            type="Final"))
+    return rows
+
+
+def combined_con() -> duckdb.DuckDBPyConnection:
+    """A meet tagged BOTH DM-L and DMJ-L (a combined senior+junior championship),
+    2025 + 2026. In M 100 Fri three seniors (born 2000) fill the final and take the
+    senior podium; four juniors (born season-17 -> age 17) swim heats only and never
+    reach the final, so the junior championship (ranked on the qualifying heat swim)
+    is a different podium. This is the case webbuild must junior-scope."""
+    obt, meets = [], []
+    for season, mid, mdate in [(2025, "C2025", "2025-04-10"),
+                               (2026, "C2026", "2026-04-10")]:
+        name = f"Combined Champs {season}"
+        meets.append(dict(meet_id=mid, meet_name=name, venue="Aarhus",
+                          course="LCM", season=season, meet_date=mdate,
+                          category=["DM-L", "DMJ-L"]))
+        seniors = [("cs1", "Senior Ace", "AGF", 5300, 2000),
+                   ("cs2", "Senior Two", "SIGMA", 5350, 2000),
+                   ("cs3", "Senior Three", "VEST", 5400, 2000)]
+        fillers = [(f"cf{i}", f"Filler {i}", "FILL", 5450 + i * 30, 2000)
+                   for i in range(5)]                 # 5 fillers -> final has 8
+        juniors = [("cj1", "Junior Fast", "AGF", 5700, season - 17),
+                   ("cj2", "Junior Mid", "SIGMA", 5750, season - 17),
+                   ("cj3", "Junior Slow", "VEST", 5800, season - 17),
+                   ("cj4", "Junior Last", "AGF", 5850, season - 17)]
+        obt += _combined_event(mid, name, season, mdate, "M", 100, "Fri",
+                               seniors + fillers, juniors)
+        seniors_ryg = [("rs1", "Ryg Senior A", "AGF", 13000, 2000),
+                       ("rs2", "Ryg Senior B", "SIGMA", 13100, 2000),
+                       ("rs3", "Ryg Senior C", "VEST", 13200, 2000)]
+        obt += _combined_event(mid, name, season, mdate, "F", 200, "Ryg",
+                               seniors_ryg, [])          # no juniors in this event
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+    return con
+
+
+def junior_only_con() -> duckdb.DuckDBPyConnection:
+    """A DMJ-L meet NOT combined with any senior category: juniors race their own
+    heats + final, medals from the final. webbuild must leave this untouched
+    (junior_scoped == False, all senior-structure tiles present)."""
+    mid, name, season, mdate = "J2026", "Junior Champs 2026", 2026, "2026-04-10"
+    meets = [dict(meet_id=mid, meet_name=name, venue="Aarhus", course="LCM",
+                  season=season, meet_date=mdate, category=["DMJ-L"])]
+    rows, _ = _event(mid, name, season, mdate, "M", 100, "Fri",
+                     [("j1", "Ung Anna", "AGF", 5600),
+                      ("j2", "Ung Bo", "SIGMA", 5650),
+                      ("j3", "Ung Cara", "VEST", 5700)], start_rid=1)
+    con = duckdb.connect()
+    build_curated(con, obt=rows, meets=meets, splits=[])
+    create_views(con)
+    return con
+
+
 def relay_con() -> duckdb.DuckDBPyConnection:
     """A DM-L meet in 2025 + 2026 with individual AND relay events, so relay
     queries and the individual aggregates are exercised side by side. Separate

@@ -12,6 +12,7 @@
   let { params = {} } = $props()
 
   let race = $state(null)
+  const jr = $derived(race?.junior_scoped === true)
   let loading = $state(true)
   let err = $state(null)
 
@@ -35,11 +36,11 @@
           { label: race.is_relay ? 'Hold' : 'Deltagere', value: formatInt(race.facts.contestants) },
           { label: 'Diskvalifikationer', value: formatInt(race.facts.dsq) },
           { label: 'Vindertid', value: formatTimeStr(race.facts.winning_time) },
-          ...(race.is_relay ? [] : [
+          ...(race.is_relay || jr ? [] : [
             { label: 'A-finale-grænse', value: formatTime(race.facts.cutline_centiseconds) },
           ]),
           { label: 'Median', value: formatTime(race.facts.median_cs) },
-          ...(race.is_relay ? [] : [
+          ...(race.is_relay || jr ? [] : [
             { label: 'Spredning 1.–8.', value: formatTime(race.facts.spread_1_8_cs) },
             { label: 'Juniorer', value: formatInt(race.facts.juniors) },
           ]),
@@ -102,7 +103,7 @@
       lowerIsBetter={true}
       format={formatTime}
     />
-    {#if !race.is_relay}
+    {#if !race.is_relay && !jr}
       <TrendChart
         data={race.season_comparison}
         x="season"
