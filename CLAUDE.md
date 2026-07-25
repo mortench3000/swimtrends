@@ -108,11 +108,24 @@ cdk deploy SwimtrendsIngestionStack \
   in filename order; they bind to `cur_obt`/`cur_dim_meet`/`cur_fact_split`.
   Prefer a view over baking derived policy into curate (junior status, etc.).
 - Match surrounding style; keep changes minimal and focused.
+- **Workflow:** when implementation is complete and tests pass, push the branch
+  and open a PR (squash-merge to master, matching history — don't commit to
+  master directly). After a PR merges, deploy if the web app or its data needs
+  it (see Guardrails).
 
 ## Guardrails
 - **Be polite to svømmetider.dk** (host `xn--svmmetider-1cb.dk`): single,
   **sequential** requests only — never parallelize scrapes. The scraper already
   paces itself (0.25 s delay, backoff on 415/429/5xx). Backfill one meet at a time.
-- **Never deploy without `-c alert_email`** (see above).
-- Confirm before hard-to-reverse or outward-facing actions (deploys, S3
-  overwrites, force-dispatch of the whole registry).
+- **Never deploy the CDK stacks without `-c alert_email`** (see above).
+- **Web deploys are low-stakes — just do them when needed, no need to ask.** The
+  live site (swimtrends.dk) is production but not critical. After a PR merges,
+  run `make web-release` (SPA + data + CloudFront invalidation) when code and
+  data both changed, or `make web-refresh` (data only) when only the curated zone
+  moved. Note: `web-refresh`/`web-release` are **slow (~50 min)** — `webbuild`
+  reads the whole curated zone from S3 one race at a time and is **silent until
+  the final `wrote N files`** (gauge progress by output-file mtimes, not the file
+  count, which is stable across rebuilds).
+- Still confirm before other hard-to-reverse or outward-facing actions: **CDK
+  stack deploys** (infra), raw-zone S3 overwrites, and force-dispatch of the
+  whole registry.
