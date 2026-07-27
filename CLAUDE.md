@@ -43,7 +43,7 @@ Scraping and AWS commands need network + credentials.
 ## Common commands (run from the dir shown)
 ```bash
 # Tests — always run before claiming done
-cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion (164)
+cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion + evaluation (218)
 cd swimtrends-app  && .venv/bin/python -m pytest tests/unit # CDK assertions
 cd web             && npm test                              # SPA unit tests
 
@@ -59,6 +59,11 @@ cd st-scrape && .venv/bin/python -m ingestion.cli register|dispatch|curate|class
 # CLI — read-only analytics (need only AWS creds for S3)
 cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m ingestion.cli \
     query [--sql "…"] | meets [--category X] [--season Y] [--asc] | categories | summary
+
+# AI meet evaluations — dry run (reports cache hits/misses, calls no model)
+# Needs EVAL_MODEL_ID + EVAL_GUARDRAIL_ID/_VERSION; see docs/analytics.md
+cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m evaluation \
+    --out ../web/public/data --dry-run
 ```
 
 ## Deploying the CDK stacks (there are real gotchas)
@@ -101,6 +106,17 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
 - **DSQ**: renders as a **7-column** row (rank cell `-`, `DSQ` in the time cell).
   The parser accepts `len(cells) >= 6` and maps a non-numeric rank to `-1`;
   curate excludes `rank == -1` from scoring. Don't reintroduce a `== 6` check.
+- **AI evaluations**: meet pages can carry a batch-generated Danish coach report
+  (`evaluation/`, rendered collapsed on the meet page). The model sees only the
+  **digest** (`webbuild/digest.py`) and **every number in the published text must
+  exist in it** — enforced by `evaluation/check.py`, which is why the page tells
+  readers the numbers are checkable in the tables above. Text is cached by
+  `sha256(digest + prompt/schema version + model id)`, so bumping `PROMPT_VERSION`
+  regenerates every meet. Prose about a named swimmer is limited to results facts
+  (time, points, placement, event) — no projections, no body/health/technique, no
+  criticism, no age or schooling; juniors are minors. Enforced twice: the system
+  prompt and a Bedrock Guardrail (`SwimtrendsEvaluationStack`, four denied topics
+  + contextual grounding). See [`docs/analytics.md`](docs/analytics.md).
 
 ## Development conventions
 - **TDD.** Write the failing test first, watch it fail, then implement. App tests
