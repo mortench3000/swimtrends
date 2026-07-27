@@ -90,6 +90,19 @@ class SwimtrendsWebStack(Stack):
         )
         # `aws s3 sync --delete` needs list, put and delete on the bucket.
         bucket.grant_read_write(deploy_role)
+        # The bucket also serves /data/*.json (~1698 files, ~50 min to
+        # rebuild) and has versioning off. The only thing keeping the SPA
+        # sync's `--delete` from wiping that zone today is the Makefile's
+        # `--exclude "data/*"` flag — a shell flag, not a permission. This
+        # explicit Deny is a second, independent guard: an IAM Deny always
+        # wins over the Allow from grant_read_write above, so a recipe that
+        # ever loses the exclude flag fails closed with AccessDenied instead
+        # of deleting the data zone.
+        deploy_role.add_to_policy(iam.PolicyStatement(
+            effect=iam.Effect.DENY,
+            actions=["s3:DeleteObject*"],
+            resources=[bucket.arn_for_objects("data/*")],
+        ))
         deploy_role.add_to_policy(iam.PolicyStatement(
             actions=["cloudfront:CreateInvalidation"],
             resources=[distribution.distribution_arn],

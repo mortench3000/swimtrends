@@ -1,3 +1,5 @@
+import json
+
 import aws_cdk as cdk
 from aws_cdk import assertions
 from swimtrends_app.swimtrends_cert_stack import SwimtrendsCertStack
@@ -129,3 +131,15 @@ def test_deploy_role_can_read_this_stacks_outputs():
 
 def test_deploy_role_arn_is_an_output():
     assert "GitHubDeployRoleArn" in _template().find_outputs("*")
+
+
+def test_deploy_role_cannot_delete_the_data_zone():
+    denies = [
+        stmt
+        for policy in _template().find_resources("AWS::IAM::Policy").values()
+        for stmt in policy["Properties"]["PolicyDocument"]["Statement"]
+        if stmt["Effect"] == "Deny"
+    ]
+    assert len(denies) == 1, denies
+    assert denies[0]["Action"] == "s3:DeleteObject*"
+    assert "/data/*" in json.dumps(denies[0]["Resource"])
