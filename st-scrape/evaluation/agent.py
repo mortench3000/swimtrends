@@ -75,9 +75,9 @@ Rules — these are absolute:
    (e.g. "uændret" and "en stigning på ..."). A non-zero delta is a change,
    however small — call it unchanged only when it is exactly 0. If your
    wording and a digest.derived percentage disagree, trust the digest.
-8. PLAIN DANISH. Write natural, correctly spelled Danish prose only — never a
-   field name, camelCase identifier, or English technical token. Say "elitens
-   median", not "elitens medianScore".
+8. PLAIN DANISH. Write natural Danish prose only — never a field name,
+   camelCase identifier, or English technical token. Say "elitens median",
+   not "elitens medianScore".
 9. EVENT NAMES. digest.top_swims[].event carries a gender marker (e.g.
    "M 50m Ryg (LCM)", "F 50m Ryg (LCM)") because men's and women's events
    share the same name otherwise. Always carry that gender into your text —
