@@ -70,3 +70,62 @@ def test_app_synthesizes_both_web_stacks():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)  # app.py calls app.synth() at import
     assert app_path.exists()
+
+
+def test_github_oidc_provider_created():
+    _template().has_resource_properties("AWS::IAM::OIDCProvider", {
+        "Url": "https://token.actions.githubusercontent.com",
+        "ClientIdList": ["sts.amazonaws.com"],
+    })
+
+
+def test_deploy_role_trusts_only_master_of_this_repo():
+    _template().has_resource_properties("AWS::IAM::Role", {
+        "AssumeRolePolicyDocument": assertions.Match.object_like({
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": "sts:AssumeRoleWithWebIdentity",
+                    "Condition": {
+                        "StringEquals": {
+                            "token.actions.githubusercontent.com:aud":
+                                "sts.amazonaws.com",
+                        },
+                        "StringLike": {
+                            "token.actions.githubusercontent.com:sub":
+                                "repo:mortench3000/swimtrends:ref:refs/heads/master",
+                        },
+                    },
+                }),
+            ]),
+        }),
+    })
+
+
+def test_deploy_role_invalidation_is_scoped_to_the_distribution():
+    _template().has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": assertions.Match.object_like({
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": "cloudfront:CreateInvalidation",
+                    "Resource": assertions.Match.not_("*"),
+                }),
+            ]),
+        }),
+    })
+
+
+def test_deploy_role_can_read_this_stacks_outputs():
+    _template().has_resource_properties("AWS::IAM::Policy", {
+        "PolicyDocument": assertions.Match.object_like({
+            "Statement": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "Action": "cloudformation:DescribeStacks",
+                    "Resource": {"Ref": "AWS::StackId"},
+                }),
+            ]),
+        }),
+    })
+
+
+def test_deploy_role_arn_is_an_output():
+    assert "GitHubDeployRoleArn" in _template().find_outputs("*")

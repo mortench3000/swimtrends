@@ -6,6 +6,7 @@ from aws_cdk import aws_budgets as budgets
 from aws_cdk import aws_certificatemanager as acm
 from aws_cdk import aws_cloudfront as cloudfront
 from aws_cdk import aws_cloudfront_origins as origins
+from aws_cdk import aws_iam as iam
 from aws_cdk import aws_route53 as route53
 from aws_cdk import aws_route53_targets as targets
 from aws_cdk import aws_s3 as s3
@@ -13,6 +14,8 @@ from constructs import Construct
 
 DOMAIN = "swimtrends.dk"
 HOSTED_ZONE_ID = "Z05943842L8KIUA914B4J"
+GITHUB_OIDC_URL = "https://token.actions.githubusercontent.com"
+GITHUB_REPO = "mortench3000/swimtrends"
 
 
 class SwimtrendsWebStack(Stack):
@@ -58,6 +61,42 @@ class SwimtrendsWebStack(Stack):
         route53.ARecord(self, "AliasA", zone=zone, target=alias, record_name=DOMAIN)
         route53.AaaaRecord(self, "AliasAAAA", zone=zone, target=alias, record_name=DOMAIN)
 
+        # GitHub Actions deploys the SPA on merge to master. OIDC, so no
+        # long-lived access keys live in GitHub. The sub condition is the
+        # security boundary: only master-branch runs of this repo can assume
+        # the role — a fork's PR cannot, and PR runs never ask for credentials.
+        oidc = iam.CfnOIDCProvider(
+            self, "GitHubOidcProvider",
+            url=GITHUB_OIDC_URL,
+            client_id_list=["sts.amazonaws.com"],
+        )
+        issuer = GITHUB_OIDC_URL.removeprefix("https://")
+        deploy_role = iam.Role(
+            self, "GitHubDeployRole",
+            assumed_by=iam.FederatedPrincipal(
+                oidc.attr_arn,
+                conditions={
+                    "StringEquals": {f"{issuer}:aud": "sts.amazonaws.com"},
+                    "StringLike": {
+                        f"{issuer}:sub": f"repo:{GITHUB_REPO}:ref:refs/heads/master"},
+                },
+                assume_role_action="sts:AssumeRoleWithWebIdentity",
+            ),
+            description="GitHub Actions: build + publish the SPA to the site bucket",
+        )
+        # `aws s3 sync --delete` needs list, put and delete on the bucket.
+        bucket.grant_read_write(deploy_role)
+        deploy_role.add_to_policy(iam.PolicyStatement(
+            actions=["cloudfront:CreateInvalidation"],
+            resources=[distribution.distribution_arn],
+        ))
+        # The Makefile resolves the bucket name and distribution id from this
+        # stack's outputs at deploy time, so CI needs to read them.
+        deploy_role.add_to_policy(iam.PolicyStatement(
+            actions=["cloudformation:DescribeStacks"],
+            resources=[self.stack_id],
+        ))
+
         # Account-wide monthly cost budget: early warning if a bot flood (or
         # anything else) pushes AWS spend past normal — the site normally costs
         # cents/month. Budgets can't cap spend, only alert; email rides on the
@@ -89,3 +128,4 @@ class SwimtrendsWebStack(Stack):
         CfnOutput(self, "SiteBucketName", value=bucket.bucket_name)
         CfnOutput(self, "DistributionId", value=distribution.distribution_id)
         CfnOutput(self, "SiteUrl", value=f"https://{DOMAIN}")
+        CfnOutput(self, "GitHubDeployRoleArn", value=deploy_role.role_arn)
