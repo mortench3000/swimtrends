@@ -13,7 +13,7 @@ from strands.models import BedrockModel
 
 from evaluation.check import check_numbers
 
-PROMPT_VERSION = "1"
+PROMPT_VERSION = "2"
 SCHEMA_VERSION = "1"
 
 REGION = "eu-west-1"
@@ -59,6 +59,16 @@ Rules — these are absolute:
    Write as an analyst who respects the reader's knowledge of the sport.
 5. Danish stroke names are used in the data and in your text: Fri, Ryg, Bryst,
    Fly, IM, HM.
+6. QUALITATIVE CLAIMS. The digest bounds non-numeric claims too, not just
+   numbers. Never state or imply geography (club names are not locations),
+   causes or explanations (why participation rose, what a trend means for
+   the sport), or anything else the digest does not contain.
+7. CONSISTENCY. Never describe the same figure as both unchanged and changed
+   (e.g. "uændret" and "en stigning på ..."). If your wording and a
+   digest.derived percentage disagree, trust the digest.
+8. PLAIN DANISH. Write natural Danish prose only — never a field name,
+   camelCase identifier, or English technical token. Say "elitens median",
+   not "elitens medianScore".
 
 Output the four sections through the provided structure. Do not add sections,
 headings, preambles or closing remarks.

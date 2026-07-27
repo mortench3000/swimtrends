@@ -17,8 +17,21 @@ directly in the eu-west-1 foundation-model list:
 
     eu.anthropic.claude-sonnet-5                 $2.20/MTok in, $11.00/MTok out
     eu.anthropic.claude-haiku-4-5-20251001-v1:0  $1.10/MTok in, $5.50/MTok out
-    eu.amazon.nova-lite-v1:0                     $0.069/MTok in, $0.276/MTok out
+    eu.amazon.nova-2-lite-v1:0                   $0.374/MTok in, $3.157/MTok out
     mistral.ministral-3-8b-instruct              $0.18/MTok in, $0.18/MTok out
+
+Nova candidate swapped 2026-07-27 at the user's request: Nova Lite ->
+Nova 2 Lite. `eu.amazon.nova-2-lite-v1:0` ("EU Amazon Nova 2 Lite") confirmed
+present via `list-inference-profiles` for eu-west-1. Its `AmazonBedrock`
+offer usagetypes are priced per 1K tokens, not per MTok — read directly from
+the offer file:
+
+    EU-Nova2.0Lite-input-tokens   $0.000374 / 1K tokens -> $0.374 / MTok
+    EU-Nova2.0Lite-output-tokens  $0.003157 / 1K tokens -> $3.157 / MTok
+
+(the plain `EU-` usagetypes, not `-flex` / `-priority` / `-batch` /
+`-cross-region-global`, matching how the `eu.` regional profile is invoked
+here and how the other three candidates were chosen).
 
 Account-level model access (a candidate can still fail its first Converse call
 with AccessDeniedException even though it is listed here) is NOT verified by
@@ -42,7 +55,7 @@ from webbuild import digest as dg
 PRICES: dict[str, tuple[float, float]] = {
     "eu.anthropic.claude-sonnet-5": (2.20, 11.00),
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0": (1.10, 5.50),
-    "eu.amazon.nova-lite-v1:0": (0.069, 0.276),
+    "eu.amazon.nova-2-lite-v1:0": (0.374, 3.157),
     "mistral.ministral-3-8b-instruct": (0.18, 0.18),
 }
 
