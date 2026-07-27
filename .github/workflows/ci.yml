@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  id-token: write   # mint the OIDC token
+  contents: read
+
+# Two master pushes must not run overlapping s3 syncs. Not cancel-in-progress:
+# a half-finished sync is worse than a queued one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: st-scrape/requirements-dev.txt
+
+      - name: Install Python deps
+        run: pip install -r requirements-dev.txt
+        working-directory: st-scrape
+
+      # moto-backed: no network, no AWS credentials needed.
+      - name: st-scrape tests
+        run: python -m pytest -q
+        working-directory: st-scrape
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install web deps
+        run: npm ci
+        working-directory: web
+
+      - name: web tests
+        run: npm test
+        working-directory: web
+
+      - name: Assume the deploy role
+        if: github.ref == 'refs/heads/master'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: eu-west-1
+
+      # Data (/data/*.json) is NOT touched here — see the spec.
+      - name: Deploy the SPA
+        if: github.ref == 'refs/heads/master'
+        run: make web-deploy AWS_PROFILE_FLAG=

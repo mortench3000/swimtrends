@@ -43,8 +43,9 @@ Scraping and AWS commands need network + credentials.
 ## Common commands (run from the dir shown)
 ```bash
 # Tests — always run before claiming done
-cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion (134)
+cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion (164)
 cd swimtrends-app  && .venv/bin/python -m pytest tests/unit # CDK assertions
+cd web             && npm test                              # SPA unit tests
 
 # Scrape one meet (writes db/<id>_*.jsonl locally)
 cd st-scrape && .venv/bin/python scrape_races.py 12486 DM-L DMJ-L
@@ -65,13 +66,15 @@ cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m ingestion.cli \
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22        # node 22, NOT the default
 cd swimtrends-app
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-cdk deploy SwimtrendsIngestionStack \
+npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   --app ".venv/bin/python3 app.py" \
   -c alert_email=<your-address> \
   --require-approval never
 ```
-- **Use node 22's `cdk`** (or `npx aws-cdk@2.1125.0`). The default nvm node has a
-  stale global `cdk` incompatible with the venv's `aws-cdk-lib`.
+- **Use `npx aws-cdk@2.1133.0`, not a bare `cdk`.** Node 22 is still required
+  (`nvm use 22`) to run it, but node 22's global `cdk` is also stuck on
+  2.1125.0, which can't read the cloud-assembly schema (54.0.0) that
+  aws-cdk-lib 2.262.1+ emits.
 - **`--app ".venv/bin/python3 app.py"`** — only the venv python has the CDK libs.
 - **ALWAYS pass `-c alert_email=<address>`.** It is read from CDK context, not
   stored anywhere. Omitting it deletes the existing SNS email subscription, so
@@ -110,8 +113,8 @@ cdk deploy SwimtrendsIngestionStack \
 - Match surrounding style; keep changes minimal and focused.
 - **Workflow:** when implementation is complete and tests pass, push the branch
   and open a PR (squash-merge to master, matching history — don't commit to
-  master directly). After a PR merges, deploy if the web app or its data needs
-  it (see Guardrails).
+  master directly). Merging deploys the SPA automatically; afterwards run
+  `make web-refresh` only if the data needs it (see Guardrails).
 
 ## Guardrails
 - **Be polite to svømmetider.dk** (host `xn--svmmetider-1cb.dk`): single,
@@ -119,13 +122,15 @@ cdk deploy SwimtrendsIngestionStack \
   paces itself (0.25 s delay, backoff on 415/429/5xx). Backfill one meet at a time.
 - **Never deploy the CDK stacks without `-c alert_email`** (see above).
 - **Web deploys are low-stakes — just do them when needed, no need to ask.** The
-  live site (swimtrends.dk) is production but not critical. After a PR merges,
-  run `make web-release` (SPA + data + CloudFront invalidation) when code and
-  data both changed, or `make web-refresh` (data only) when only the curated zone
-  moved. Note: `web-refresh`/`web-release` are **slow (~50 min)** — `webbuild`
-  reads the whole curated zone from S3 one race at a time and is **silent until
-  the final `wrote N files`** (gauge progress by output-file mtimes, not the file
-  count, which is stable across rebuilds).
+  live site (swimtrends.dk) is production but not critical. The **SPA deploys
+  itself**: `.github/workflows/ci.yml` builds and publishes it on every merge to
+  `master`, so app-only changes need no manual step. `make web-deploy` is the
+  local fallback (Actions down, or an unmerged build must go live). **Data is
+  never deployed by CI** — run `make web-refresh` when the curated zone moved or
+  a change alters the generated JSON. Note: `web-refresh` is **slow (~50 min)** —
+  `webbuild` reads the whole curated zone from S3 one race at a time and is
+  **silent until the final `wrote N files`** (gauge progress by output-file
+  mtimes, not the file count, which is stable across rebuilds).
 - Still confirm before other hard-to-reverse or outward-facing actions: **CDK
   stack deploys** (infra), raw-zone S3 overwrites, and force-dispatch of the
   whole registry.
