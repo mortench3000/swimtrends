@@ -100,6 +100,106 @@ _JUNIOR_ELITE_SQL = """
 """
 
 
+TOP_N = 10
+
+# Distance buckets coarse enough that each has several swims at 37 meets.
+_DIST_GROUP = """
+    CASE WHEN distance <= 100 THEN 'sprint'
+         WHEN distance <= 400 THEN 'middel'
+         ELSE 'lang' END
+"""
+
+# One row per swimmer per event (heats/final deduped), best swims first.
+# params: category, meet_id
+_TOP_SWIMS_SQL = f"""
+    SELECT name, club, event, completed_time AS time, points, rank
+    FROM results_by_category
+    WHERE category = ? AND meet_id = ? AND class = 'open'
+      AND points IS NOT NULL AND swimmer_id IS NOT NULL
+    QUALIFY row_number() OVER (
+        PARTITION BY swimmer_id, gender, distance, stroke, course
+        ORDER BY points DESC) = 1
+    ORDER BY points DESC LIMIT {TOP_N}
+"""
+
+# params: meet_id
+_JUNIOR_TOP_SWIMS_SQL = f"""
+    SELECT name, club, event, completed_time AS time, points,
+           junior_rank AS rank
+    FROM junior_championship
+    WHERE meet_id = ? AND points IS NOT NULL
+    QUALIFY row_number() OVER (
+        PARTITION BY swimmer_id, gender, distance, stroke, course
+        ORDER BY points DESC) = 1
+    ORDER BY points DESC LIMIT {TOP_N}
+"""
+
+# median points this season vs the mean of the prior seasons in the window,
+# per stroke x distance group. params: category, season, season, season, season
+_BY_STROKE_SQL = f"""
+    WITH best AS (
+        SELECT season, stroke, {_DIST_GROUP} AS dist_group, swimmer_id,
+               gender, distance, course, max(points) AS pts
+        FROM results_by_category
+        WHERE category = ? AND season BETWEEN ? - 5 AND ? AND class = 'open'
+          AND points IS NOT NULL AND swimmer_id IS NOT NULL
+        GROUP BY season, stroke, dist_group, swimmer_id, gender, distance, course
+    )
+    SELECT stroke, dist_group,
+           CAST(quantile_cont(pts, 0.5) FILTER (WHERE season = ?) AS BIGINT)
+               AS median_points,
+           CAST(quantile_cont(pts, 0.5) FILTER (WHERE season < ?) AS BIGINT)
+               AS prev5_median
+    FROM best
+    GROUP BY stroke, dist_group
+    HAVING median_points IS NOT NULL
+    ORDER BY stroke, dist_group
+"""
+
+# params: season, season, season, season
+_JUNIOR_BY_STROKE_SQL = f"""
+    WITH best AS (
+        SELECT season, stroke, {_DIST_GROUP} AS dist_group, swimmer_id,
+               gender, distance, course, max(points) AS pts
+        FROM junior_championship
+        WHERE season BETWEEN ? - 5 AND ? AND points IS NOT NULL
+        GROUP BY season, stroke, dist_group, swimmer_id, gender, distance, course
+    )
+    SELECT stroke, dist_group,
+           CAST(quantile_cont(pts, 0.5) FILTER (WHERE season = ?) AS BIGINT)
+               AS median_points,
+           CAST(quantile_cont(pts, 0.5) FILTER (WHERE season < ?) AS BIGINT)
+               AS prev5_median
+    FROM best
+    GROUP BY stroke, dist_group
+    HAVING median_points IS NOT NULL
+    ORDER BY stroke, dist_group
+"""
+
+_DERIVED_METRICS = ["median_points", "elite_median_points", "entrants", "clubs"]
+
+
+def _derived(facts: dict, history: list[dict]) -> dict:
+    """Rounded percentage deltas of this meet vs the mean of the prior seasons.
+
+    Precomputed here so the report can quote a percentage without the model
+    doing arithmetic — check.py then needs no special case for derived numbers.
+    Metrics with no history, a null value, or a zero baseline are omitted.
+    """
+    prior = history[1:]
+    out = {}
+    for metric in _DERIVED_METRICS:
+        vals = [h[metric] for h in prior if h.get(metric) is not None]
+        now = facts.get(metric)
+        if not vals or now is None:
+            continue
+        base = sum(vals) / len(vals)
+        if base == 0:
+            continue
+        out[f"{metric}_vs_prev5_pct"] = round(100 * (now / base - 1))
+    return out
+
+
 def build(con, category: str, meet_id: str) -> dict:
     junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
     head = con.execute(_HEAD_SQL, [category, meet_id]).fetchone()
@@ -124,9 +224,23 @@ def build(con, category: str, meet_id: str) -> dict:
     for h in history:
         h["elite_median_points"] = elite.get(h["season"])
 
+    swim_cols = ["name", "club", "event", "time", "points", "rank"]
+    stroke_cols = ["stroke", "dist_group", "median_points", "prev5_median"]
+    if junior:
+        top = con.execute(_JUNIOR_TOP_SWIMS_SQL, [meet_id]).fetchall()
+        strokes = con.execute(_JUNIOR_BY_STROKE_SQL,
+                              [season, season, season, season]).fetchall()
+    else:
+        top = con.execute(_TOP_SWIMS_SQL, [category, meet_id]).fetchall()
+        strokes = con.execute(_BY_STROKE_SQL,
+                              [category, season, season, season, season]).fetchall()
+
     return {
         "meet": {"name": head[0], "date": head[1], "season": season,
                  "category": category, "course": head[3]},
         "facts": facts,
         "season_history": history,
+        "top_swims": [dict(zip(swim_cols, r)) for r in top],
+        "by_stroke": [dict(zip(stroke_cols, r)) for r in strokes],
+        "derived": _derived(facts, history),
     }
