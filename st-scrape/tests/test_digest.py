@@ -37,3 +37,13 @@ def test_junior_scoped_meet_uses_the_junior_championship():
     d = digest.build(junior_digest_con(), "DMJ-L", "J2026")
     assert d["meet"]["category"] == "DMJ-L"
     assert d["facts"]["entrants"] == 4             # the four juniors, not the seniors
+
+
+def test_junior_scoping_follows_any_senior_plus_junior_tag_pair():
+    """A DO+DMJ-L meet is junior-scoped on the meet page (queries._meet_is_combined),
+    so the digest must scope it the same way — otherwise the evaluation describes a
+    different field than the page shows."""
+    con = junior_digest_con()
+    con.execute("UPDATE cur_dim_meet SET category = ['DO', 'DMJ-L'] WHERE meet_id = 'J2026'")
+    d = digest.build(con, "DMJ-L", "J2026")
+    assert d["facts"]["entrants"] == 4        # the four juniors, not the seniors

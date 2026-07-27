@@ -8,6 +8,8 @@ Window: the meet's own season plus the five prior seasons ON RECORD (not
 season-5, since a category may have gaps).
 """
 
+from webbuild.queries import _meet_is_combined
+
 WINDOW = 6          # the meet's season + 5 prior
 
 _HEAD_SQL = """
@@ -96,15 +98,6 @@ _JUNIOR_ELITE_SQL = """
     SELECT season, CAST(quantile_cont(pts, 0.5) AS BIGINT) AS elite_median_points
     FROM ranked WHERE rk <= 10 GROUP BY season
 """
-
-
-def _meet_is_combined(con, meet_id: str) -> bool:
-    """True when this meet is tagged both DM-L and DMJ-L, i.e. a combined
-    senior+junior championship whose junior title comes from junior_championship."""
-    cats = con.execute(
-        "SELECT any_value(category) FROM cur_dim_meet WHERE meet_id = ?",
-        [meet_id]).fetchone()[0] or []
-    return "DM-L" in cats and "DMJ-L" in cats
 
 
 def build(con, category: str, meet_id: str) -> dict:
