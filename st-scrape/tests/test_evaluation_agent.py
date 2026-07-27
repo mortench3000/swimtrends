@@ -24,6 +24,7 @@ class FakeAgent:
     def __init__(self, *reports):
         self.reports = list(reports)
         self.prompts = []
+        self.messages = []
 
     def __call__(self, prompt, **kwargs):
         self.prompts.append(prompt)
@@ -63,6 +64,16 @@ def test_evaluate_raises_when_the_retry_also_fabricates():
     assert "888" in str(e.value)
 
 
+def test_evaluate_does_not_carry_history_between_meets():
+    """The digest must be the agent's entire world: a caller reusing one agent
+    across meets would otherwise leak meet A's content into meet B's prompt,
+    and the number check screens numbers only — a leaked name would pass."""
+    fake = FakeAgent(_sections("612 point."), _sections("612 point."))
+    fake.messages = [{"role": "user", "content": "an earlier meet's conversation"}]
+    ag.evaluate(DIGEST, agent=fake)
+    assert fake.messages == []
+
+
 def test_schema_rejects_a_wrong_heading_set():
     with pytest.raises(Exception):
         ag.MeetEvaluation(sections=[{"heading": "Noget andet", "body": "x"}])
@@ -87,12 +98,19 @@ def test_build_agent_wires_region_model_and_a_numbered_guardrail(monkeypatch):
     assert seen["guardrail_id"] == "gr-1"
     assert seen["guardrail_version"] == "3"
     assert seen["max_tokens"] == 1200
+    assert seen["cache_prompt"] == "default"
 
 
 def test_build_agent_refuses_a_draft_guardrail():
     with pytest.raises(ValueError):
         ag.build_agent(model_id="model-x", guardrail_id="gr-1",
                        guardrail_version="DRAFT")
+
+
+def test_build_agent_refuses_a_padded_draft_guardrail():
+    with pytest.raises(ValueError):
+        ag.build_agent(model_id="model-x", guardrail_id="gr-1",
+                       guardrail_version="  DRAFT  ")
 
 
 def test_model_label_falls_back_to_the_id():

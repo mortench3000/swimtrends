@@ -100,7 +100,7 @@ def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str) -> 
     """A Converse-API agent with the guardrail applied inline at a numbered
     version. DRAFT is refused: a draft guardrail can change under us between
     two meets in the same batch."""
-    if not guardrail_version or guardrail_version.upper() == "DRAFT":
+    if not guardrail_version or guardrail_version.strip().upper() == "DRAFT":
         raise ValueError("guardrail_version must be a numbered version, not DRAFT")
     model = BedrockModel(
         model_id=model_id,
@@ -126,6 +126,14 @@ def evaluate(digest: dict, *, agent, retries: int = 1) -> list[dict]:
     """digest -> [{heading, body}, ...]. Raises EvaluationError if the number
     check still fails after `retries` rewrites."""
     from evaluation.cache import canonical_json      # local: avoids a cycle
+
+    # The docstring's "the digest is the agent's entire world" has to be
+    # enforced here, not assumed: a batch caller reusing one Agent across
+    # meets would otherwise carry meet A's history into meet B's prompt, and
+    # check_numbers screens numbers only — a leaked name would pass.
+    messages = getattr(agent, "messages", None)
+    if messages is not None:
+        messages.clear()
 
     digest_json = canonical_json(digest)
     offenders: set[str] = set()
