@@ -53,3 +53,20 @@ def test_outputs_expose_the_id_and_version():
     assert outputs["GuardrailVersion"]["Value"] == {
         "Fn::GetAtt": ["EvaluationGuardrailVersion", "Version"],
     }
+
+
+def test_guardrail_strings_stay_within_the_conservative_documented_limits():
+    """Neither cdk synth nor cfn-lint validates these lengths, and the AWS API
+    reference (200 for a topic definition) disagrees with the CloudFormation
+    reference (1000). Assert the conservative limit so a future topic can't
+    ship a string that only fails at deploy time."""
+    t = _template()
+    guardrails = t.find_resources("AWS::Bedrock::Guardrail")
+    assert guardrails, "no guardrail in the template"
+    for res in guardrails.values():
+        props = res["Properties"]
+        assert len(props["Description"]) <= 200
+        for topic in props["TopicPolicyConfig"]["TopicsConfig"]:
+            assert len(topic["Definition"]) <= 200, topic["Name"]
+            for example in topic.get("Examples", []):
+                assert len(example) <= 100, topic["Name"]

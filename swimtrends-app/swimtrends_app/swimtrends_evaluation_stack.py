@@ -75,10 +75,9 @@ class SwimtrendsEvaluationStack(Stack):
                     bedrock.CfnGuardrail.TopicConfigProperty(
                         name="PersonalDetails", type="DENY",
                         definition=("Personal or identifying details about a named "
-                                    "athlete beyond their club affiliation: age, "
-                                    "birth year, year group, school or education, "
-                                    "family, home address or town of residence, "
-                                    "employment, or any other private-life detail."),
+                                    "athlete beyond club affiliation: age, birth "
+                                    "year, year group, school, family, residence, "
+                                    "employment, or other private life."),
                         examples=[
                             "Hun er 16 år og går i 9. klasse på Ordrup Skole.",
                             "Han er født i 2009 og bor i Aarhus med sin familie.",
