@@ -205,6 +205,19 @@ def _derived(facts: dict, history: list[dict]) -> dict:
     return out
 
 
+def _with_stroke_deltas(rows: list[dict]) -> list[dict]:
+    """Precomputed median_points - prev5_median per by_stroke row, so the
+    report can quote a stroke's movement without subtracting two medians
+    itself — same principle as _derived, applied at stroke granularity.
+    None when there's no prior-window median (an early-season meet with no
+    history), same as prev5_median itself.
+    """
+    for r in rows:
+        r["delta"] = (r["median_points"] - r["prev5_median"]
+                      if r["prev5_median"] is not None else None)
+    return rows
+
+
 def build(con, category: str, meet_id: str) -> dict:
     junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
     head = con.execute(_HEAD_SQL, [category, meet_id]).fetchone()
@@ -250,6 +263,6 @@ def build(con, category: str, meet_id: str) -> dict:
         "facts": facts,
         "season_history": history,
         "top_swims": [dict(zip(swim_cols, r)) for r in top],
-        "by_stroke": [dict(zip(stroke_cols, r)) for r in strokes],
+        "by_stroke": _with_stroke_deltas([dict(zip(stroke_cols, r)) for r in strokes]),
         "derived": _derived(facts, history),
     }

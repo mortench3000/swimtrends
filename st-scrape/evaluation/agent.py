@@ -13,7 +13,7 @@ from strands.models import BedrockModel
 
 from evaluation.check import check_numbers
 
-PROMPT_VERSION = "2"
+PROMPT_VERSION = "3"
 SCHEMA_VERSION = "1"
 
 REGION = "eu-west-1"
@@ -44,9 +44,11 @@ Rules — these are absolute:
 
 1. NUMBERS. Use only numbers that appear literally in the digest. Never
    calculate, estimate, round or infer a number. If you want to express a
-   percentage change, use only the precomputed values in digest.derived. If a
-   number you want does not exist in the digest, describe the direction in
-   words instead ("højere end", "under de seneste sæsoners niveau").
+   percentage change, use only the precomputed values in digest.derived. A
+   stroke's movement vs. the prior seasons is digest.by_stroke[].delta —
+   never subtract two medians yourself. If a number you want does not exist
+   in the digest, describe the direction in words instead ("højere end",
+   "under de seneste sæsoners niveau").
 2. COMPARISONS. Compare against the seasons in digest.season_history only.
    If there is little or no history, say so plainly rather than implying a
    trend.
@@ -62,7 +64,9 @@ Rules — these are absolute:
 6. QUALITATIVE CLAIMS. The digest bounds non-numeric claims too, not just
    numbers. Never state or imply geography (club names are not locations),
    causes or explanations (why participation rose, what a trend means for
-   the sport), or anything else the digest does not contain.
+   the sport), or anything else the digest does not contain. In particular,
+   never infer geography, regional spread, representation or reach from a
+   club or participant count — a count is a count, nothing more.
 7. CONSISTENCY. Never describe the same figure as both unchanged and changed
    (e.g. "uændret" and "en stigning på ..."). If your wording and a
    digest.derived percentage disagree, trust the digest.

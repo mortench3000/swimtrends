@@ -80,6 +80,19 @@ def test_by_stroke_prev5_is_null_when_there_is_no_history():
     assert all(r["prev5_median"] is None for r in d["by_stroke"])
 
 
+def test_by_stroke_delta_is_precomputed_median_minus_prev5():
+    """delta must be the digest's own arithmetic, not something the model
+    computes — same principle as digest.derived, applied per stroke."""
+    d = digest.build(digest_con(), "DM-L", "D2026")
+    row = next(r for r in d["by_stroke"] if r["stroke"] == "Ryg")
+    assert row["delta"] == row["median_points"] - row["prev5_median"]
+
+
+def test_by_stroke_delta_is_null_when_there_is_no_history():
+    d = digest.build(digest_con(), "DM-L", "D2021")
+    assert all(r["delta"] is None for r in d["by_stroke"])
+
+
 def test_derived_holds_rounded_percentage_deltas():
     d = digest.build(digest_con(), "DM-L", "D2026")
     assert "median_points_vs_prev5_pct" in d["derived"]
