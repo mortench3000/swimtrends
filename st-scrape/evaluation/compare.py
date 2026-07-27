@@ -56,35 +56,44 @@ def _cost(model_id, tokens_in, tokens_out):
 
 def _usage(result):
     """Token usage off a Strands AgentResult, defensively: the metrics shape
-    varies by SDK version, so fall back to zeros rather than crashing a run."""
+    varies by SDK version, so fall back to (0, 0, ok=False) rather than
+    crashing a run. `ok` lets the caller tell "genuinely free" apart from
+    "we don't actually know" — see run_one."""
     try:
         u = result.metrics.accumulated_usage
-        return int(u.get("inputTokens", 0)), int(u.get("outputTokens", 0))
+        return int(u.get("inputTokens", 0)), int(u.get("outputTokens", 0)), True
     except Exception:
-        return 0, 0
+        return 0, 0, False
 
 
 def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
-    digest = dg.build(con, category, meet_id)
-    agent = ag.build_agent(model_id=model_id, guardrail_id=guardrail_id,
-                           guardrail_version=guardrail_version)
+    """One (meet, model) cell of the comparison. Never raises: a bad meet id,
+    a model without account access, a guardrail block, or an unreadable usage
+    shape are all just a result with `error` set (or `usage_ok` False) rather
+    than an exception — a single bad cell must not lose every other row
+    already paid for in this run (digest-build and agent construction used to
+    sit outside this try, which meant a typo'd meet id aborted the whole batch)."""
     from evaluation.cache import canonical_json
     t0 = time.monotonic()
     error, sections, offenders = None, [], set()
+    tin, tout, usage_ok = 0, 0, False
     try:
+        digest = dg.build(con, category, meet_id)
+        agent = ag.build_agent(model_id=model_id, guardrail_id=guardrail_id,
+                               guardrail_version=guardrail_version)
         result = agent(f"<digest>{canonical_json(digest)}</digest>",
                        structured_output_model=ag.MeetEvaluation)
         sections = [{"heading": s.heading, "body": s.body}
                     for s in result.structured_output.sections]
         offenders = check_numbers("\n".join(s["body"] for s in sections), digest)
-        tin, tout = _usage(result)
+        tin, tout, usage_ok = _usage(result)
     except Exception as e:                      # a candidate that errors is a result
-        error, tin, tout = f"{type(e).__name__}: {e}", 0, 0
+        error = f"{type(e).__name__}: {e}"
     return {
         "category": category, "meet_id": meet_id, "model_id": model_id,
         "seconds": round(time.monotonic() - t0, 1),
-        "tokens_in": tin, "tokens_out": tout,
-        "cost": _cost(model_id, tin, tout),
+        "tokens_in": tin, "tokens_out": tout, "usage_ok": usage_ok,
+        "cost": _cost(model_id, tin, tout) if usage_ok else None,
         "offenders": sorted(offenders), "sections": sections, "error": error,
     }
 
@@ -99,13 +108,16 @@ def _html(rows) -> str:
            f"<p>prompt_version={html.escape(ag.PROMPT_VERSION)}</p>",
            "<table><tr><th>meet<th>model<th>numbers<th>in<th>out<th>$<th>s</tr>"]
     for r in rows:
-        bad = "bad" if (r["offenders"] or r["error"]) else ""
+        bad = "bad" if (r["offenders"] or r["error"] or not r["usage_ok"]) else ""
         verdict = r["error"] or (", ".join(r["offenders"]) if r["offenders"] else "ok")
-        cost = "-" if r["cost"] is None else f"{r['cost']:.4f}"
+        # An unread usage shape (see _usage) must render as "?", never as a
+        # silent 0 or $0.0000 that looks like a genuinely free/empty call.
+        tin, tout = (r["tokens_in"], r["tokens_out"]) if r["usage_ok"] else ("?", "?")
+        cost = "?" if not r["usage_ok"] else ("-" if r["cost"] is None else f"{r['cost']:.4f}")
         out.append(
             f"<tr class='{bad}'><td>{html.escape(r['category'])}/{html.escape(r['meet_id'])}"
             f"<td>{html.escape(r['model_id'])}<td>{html.escape(verdict)}"
-            f"<td>{r['tokens_in']}<td>{r['tokens_out']}<td>{cost}<td>{r['seconds']}</tr>")
+            f"<td>{tin}<td>{tout}<td>{cost}<td>{r['seconds']}</tr>")
     out.append("</table>")
 
     for meet in dict.fromkeys((r["category"], r["meet_id"]) for r in rows):
@@ -136,22 +148,30 @@ def main(argv=None):
 
     con = connect()
     meets = [tuple(m.strip().split("/", 1)) for m in args.meets.split(",") if m.strip()]
+    models = [m.strip() for m in args.models.split(",") if m.strip()]
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+
+    # This tool spends real money per row: write (overwrite) the HTML after
+    # every meet's candidates finish, not just once at the end, so a run
+    # interrupted partway (Ctrl-C, an error outside run_one) still leaves the
+    # already-paid-for rows on disk instead of discarding them.
+    print(f"{args.out} is updated after each meet — safe to open while this runs",
+          flush=True)
     rows = []
     for category, meet_id in meets:
-        for model_id in [m.strip() for m in args.models.split(",") if m.strip()]:
+        for model_id in models:
             print(f"… {category}/{meet_id} on {model_id}", flush=True)
             rows.append(run_one(con, category, meet_id, model_id,
                                 guardrail_id, guardrail_version))
-
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(_html(rows), encoding="utf-8")
+        args.out.write_text(_html(rows), encoding="utf-8")
 
     print(f"\n{'model':40} {'numbers':10} {'in':>7} {'out':>7} {'$/meet':>9} {'s':>6}")
     for r in rows:
         verdict = "ERROR" if r["error"] else ("FAIL" if r["offenders"] else "ok")
-        cost = "-" if r["cost"] is None else f"{r['cost']:.4f}"
-        print(f"{r['model_id'][:40]:40} {verdict:10} {r['tokens_in']:>7} "
-              f"{r['tokens_out']:>7} {cost:>9} {r['seconds']:>6}")
+        tin, tout = (r["tokens_in"], r["tokens_out"]) if r["usage_ok"] else ("?", "?")
+        cost = "?" if not r["usage_ok"] else ("-" if r["cost"] is None else f"{r['cost']:.4f}")
+        print(f"{r['model_id'][:40]:40} {verdict:10} {tin!s:>7} "
+              f"{tout!s:>7} {cost:>9} {r['seconds']:>6}")
     print(f"\nwrote {args.out}")
     return 0
 
