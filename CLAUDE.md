@@ -65,13 +65,15 @@ cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m ingestion.cli \
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22        # node 22, NOT the default
 cd swimtrends-app
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-cdk deploy SwimtrendsIngestionStack \
+npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   --app ".venv/bin/python3 app.py" \
   -c alert_email=<your-address> \
   --require-approval never
 ```
-- **Use node 22's `cdk`** (or `npx aws-cdk@2.1133.0`). The default nvm node has a
-  stale global `cdk` incompatible with the venv's `aws-cdk-lib`.
+- **Use `npx aws-cdk@2.1133.0`, not a bare `cdk`.** Node 22 is still required
+  (`nvm use 22`) to run it, but node 22's global `cdk` is also stuck on
+  2.1125.0, which can't read the cloud-assembly schema (54.0.0) that
+  aws-cdk-lib 2.262.1+ emits.
 - **`--app ".venv/bin/python3 app.py"`** — only the venv python has the CDK libs.
 - **ALWAYS pass `-c alert_email=<address>`.** It is read from CDK context, not
   stored anywhere. Omitting it deletes the existing SNS email subscription, so

@@ -24,7 +24,7 @@ venv python — `cdk bootstrap` otherwise uses cdk.json's `python3 app.py`
     cd swimtrends-app
     export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
     # cert stack first (us-east-1), then web stack; -c alert_email always
-    cdk deploy SwimtrendsCertStack SwimtrendsWebStack \
+    npx aws-cdk@2.1133.0 deploy SwimtrendsCertStack SwimtrendsWebStack \
       --app ".venv/bin/python3 app.py" -c alert_email=mortench.privat@gmail.com \
       --require-approval never
 - ACM DNS validation auto-creates a CNAME in the zone and may take a few minutes.
