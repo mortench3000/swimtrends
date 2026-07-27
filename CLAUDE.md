@@ -70,7 +70,7 @@ cdk deploy SwimtrendsIngestionStack \
   -c alert_email=<your-address> \
   --require-approval never
 ```
-- **Use node 22's `cdk`** (or `npx aws-cdk@2.1125.0`). The default nvm node has a
+- **Use node 22's `cdk`** (or `npx aws-cdk@2.1133.0`). The default nvm node has a
   stale global `cdk` incompatible with the venv's `aws-cdk-lib`.
 - **`--app ".venv/bin/python3 app.py"`** — only the venv python has the CDK libs.
 - **ALWAYS pass `-c alert_email=<address>`.** It is read from CDK context, not

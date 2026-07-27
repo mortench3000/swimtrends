@@ -11,7 +11,7 @@ venv python — `cdk bootstrap` otherwise uses cdk.json's `python3 app.py`
 
     cd swimtrends-app
     export AWS_PROFILE=swimtrends
-    npx aws-cdk@2.1125.0 bootstrap aws://179537025528/us-east-1 \
+    npx aws-cdk@2.1133.0 bootstrap aws://179537025528/us-east-1 \
       --app ".venv/bin/python3 app.py"
 
 ## One-time migration off the sample landing page
