@@ -196,7 +196,19 @@ One Bedrock Guardrail, defined in `swimtrends-app`, applied inline on the
 Converse call at a **numbered version — never `DRAFT`**:
 
 - Content filters at service defaults.
-- **Denied topics** for the three blocked categories above.
+- **Denied topics for all four blocked categories above** — `TalentProjection`,
+  `PhysiqueAndHealth`, `PersonalCriticism`, `PersonalDetails`. The fourth was
+  added during implementation: the first three left age/school/personal detail
+  enforced by the system prompt alone, and since the guardrail exists precisely
+  because the model may not follow the prompt, the least-protected category was
+  the one about minors' identifying details. `"Hun er 16 år og går i 9. klasse på
+  Ordrup Skole."` trips none of the first three.
+- **No PII entity filter, deliberately.** Swimmer names are already published on
+  the site as result rows and are wanted in the prose, so a `NAME` filter would
+  defeat the feature; an `AGE` filter would risk flagging legitimate aggregate
+  statements (the digest carries a `juniors` count, and the junior categories are
+  defined by an age band). A denied topic targets the harm without breaking the
+  data.
 - **Contextual grounding check** with the digest as `grounding_source`, the user
   turn as `query`, and the report as the guarded content. Starting thresholds
   0.7 grounding / 0.5 relevance, tuned from the model-eval run's false-positive

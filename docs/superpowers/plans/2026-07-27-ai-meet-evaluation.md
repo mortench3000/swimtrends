@@ -1534,7 +1534,7 @@ def _template():
     return assertions.Template.from_stack(stack)
 
 
-def test_guardrail_blocks_the_three_denied_topics():
+def test_guardrail_blocks_the_four_denied_topics():
     t = _template()
     t.has_resource_properties("AWS::Bedrock::Guardrail", {
         "TopicPolicyConfig": {
@@ -1544,6 +1544,8 @@ def test_guardrail_blocks_the_three_denied_topics():
                 assertions.Match.object_like({"Name": "PhysiqueAndHealth",
                                               "Type": "DENY"}),
                 assertions.Match.object_like({"Name": "PersonalCriticism",
+                                              "Type": "DENY"}),
+                assertions.Match.object_like({"Name": "PersonalDetails",
                                               "Type": "DENY"}),
             ])
         }
@@ -1645,6 +1647,23 @@ class SwimtrendsEvaluationStack(Stack):
                         examples=[
                             "En skødesløs vending kostede hende sejren.",
                             "Han gav tydeligvis op på sidste længde.",
+                        ]),
+                    # Added during execution: the first three topics left the
+                    # policy's age/school/personal-detail clause enforced by the
+                    # system prompt alone. No PII entity filter — a NAME filter
+                    # would defeat the feature (names are already published as
+                    # result rows) and an AGE filter would flag legitimate
+                    # aggregate statements about the junior age band.
+                    bedrock.CfnGuardrail.TopicConfigProperty(
+                        name="PersonalDetails", type="DENY",
+                        definition=("Personal or identifying details about a named "
+                                    "athlete beyond their club affiliation: age, "
+                                    "birth year, year group, school or education, "
+                                    "family, home address or town of residence, "
+                                    "employment, or any other private-life detail."),
+                        examples=[
+                            "Hun er 16 år og går i 9. klasse på Ordrup Skole.",
+                            "Han er født i 2009 og bor i Aarhus med sin familie.",
                         ]),
                 ]),
             contextual_grounding_policy_config=(
