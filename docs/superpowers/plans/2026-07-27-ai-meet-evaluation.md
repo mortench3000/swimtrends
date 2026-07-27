@@ -400,7 +400,7 @@ If `test_facts_are_present_and_scored` fails on `top_points`, print the actual v
 - [ ] **Step 6: Confirm nothing else broke**
 
 Run: `cd st-scrape && .venv/bin/python -m pytest -q`
-Expected: all existing tests still pass (134 before this task, +5 now).
+Expected: all existing tests still pass (164 before this task, +5 now).
 
 - [ ] **Step 7: Commit**
 
@@ -1433,7 +1433,7 @@ Both must fail *before* any AWS call. If either hangs or raises a botocore error
 
 - [ ] **Step 3: Add the Makefile targets**
 
-In `Makefile`, replace the `web-refresh` target with:
+In `Makefile`, replace the `web-refresh` target (keep its existing body verbatim; only the comment and the new `$(MAKE) web-eval` line are added) with:
 
 ```make
 # Regenerate the data JSON from the curated zone, add AI evaluations, and push
@@ -1689,7 +1689,7 @@ If a `CfnGuardrail` property name is rejected, check the installed aws-cdk-lib's
 ```bash
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 cd swimtrends-app && export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-npx aws-cdk@2.1125.0 synth SwimtrendsEvaluationStack --app ".venv/bin/python3 app.py" -c alert_email=mortench.privat@gmail.com > /dev/null && echo SYNTH_OK
+npx aws-cdk@2.1133.0 synth SwimtrendsEvaluationStack --app ".venv/bin/python3 app.py" -c alert_email=mortench.privat@gmail.com > /dev/null && echo SYNTH_OK
 ```
 Expected: `SYNTH_OK`
 
@@ -2149,7 +2149,7 @@ The guardrail is a **CDK stack deploy** — infra, and per the repo guardrails i
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 cd swimtrends-app
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-npx aws-cdk@2.1125.0 deploy SwimtrendsEvaluationStack \
+npx aws-cdk@2.1133.0 deploy SwimtrendsEvaluationStack \
   --app ".venv/bin/python3 app.py" \
   -c alert_email=mortench.privat@gmail.com \
   --require-approval never
@@ -2210,12 +2210,15 @@ Attach the screenshot from Task 8 Step 7.
 
 - [ ] **Step 6: After the PR merges, publish**
 
+The SPA deploys itself: `.github/workflows/ci.yml` builds and publishes it on every merge to `master`. Watch that run finish, then publish the data — CI never deploys data:
+
 ```bash
+gh run watch                       # the deploy job on the merge commit
 git checkout master && git pull
-make web-release     # ~50 min; webbuild is silent until "wrote N files"
+make web-refresh                   # ~50 min; webbuild is silent until "wrote N files"
 ```
 
-`web-release` runs the web tests, deploys the SPA, then `web-refresh` (webbuild → web-eval → sync → invalidate). Web deploys are low-stakes and need no confirmation. Then load a meet page on swimtrends.dk and confirm the section is there.
+`web-refresh` is webbuild → web-eval → sync → invalidate. This step is required here even though the change is mostly frontend, because `evaluation.json` is generated data that only `web-eval` produces. Web deploys are low-stakes and need no confirmation. Then load a meet page on swimtrends.dk and confirm the section is there.
 
 ---
 
