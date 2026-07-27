@@ -10,7 +10,7 @@ def _template():
     return assertions.Template.from_stack(stack)
 
 
-def test_guardrail_blocks_the_three_denied_topics():
+def test_guardrail_blocks_the_four_denied_topics():
     t = _template()
     t.has_resource_properties("AWS::Bedrock::Guardrail", {
         "TopicPolicyConfig": {
@@ -20,6 +20,8 @@ def test_guardrail_blocks_the_three_denied_topics():
                 assertions.Match.object_like({"Name": "PhysiqueAndHealth",
                                               "Type": "DENY"}),
                 assertions.Match.object_like({"Name": "PersonalCriticism",
+                                              "Type": "DENY"}),
+                assertions.Match.object_like({"Name": "PersonalDetails",
                                               "Type": "DENY"}),
             ])
         }
@@ -45,5 +47,9 @@ def test_a_numbered_version_is_published():
 def test_outputs_expose_the_id_and_version():
     t = _template()
     outputs = t.find_outputs("*")
-    assert "GuardrailId" in outputs
-    assert "GuardrailVersion" in outputs
+    assert outputs["GuardrailId"]["Value"] == {
+        "Fn::GetAtt": ["EvaluationGuardrail", "GuardrailId"],
+    }
+    assert outputs["GuardrailVersion"]["Value"] == {
+        "Fn::GetAtt": ["EvaluationGuardrailVersion", "Version"],
+    }

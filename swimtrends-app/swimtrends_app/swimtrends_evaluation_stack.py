@@ -3,8 +3,11 @@
 The evaluations are batch-generated prose about named swimmers — many of them
 16-18 year olds at the junior championships. The guardrail is the enforcement
 half of that policy (the system prompt is the cooperative half): it denies
-talent projection, physique/health speculation and personal criticism, and runs
-a contextual grounding check with the meet digest as the grounding source.
+talent projection, physique/health speculation, personal criticism, and
+personal details beyond club affiliation (age, school, family, home town,
+etc. — the most safety-sensitive of the four, since it targets identifying
+information about minors) — and runs a contextual grounding check with the
+meet digest as the grounding source.
 
 Applied inline on the Converse call at the NUMBERED version below — never
 DRAFT, which could change between two meets of the same batch.
@@ -25,10 +28,11 @@ class SwimtrendsEvaluationStack(Stack):
         guardrail = bedrock.CfnGuardrail(
             self, "EvaluationGuardrail",
             name="swimtrends-meet-evaluation",
-            description=("Guardrail for batch-generated Danish coach evaluations "
-                         "of swim meets. Denies projection, physique/health and "
-                         "personal criticism about named swimmers; grounds every "
-                         "claim in the meet digest."),
+            # Kept under CloudFormation's 200-char limit for this field.
+            description=("Guardrail for batch-generated Danish coach evaluations of "
+                         "swim meets. Denies projection, health/body, criticism and "
+                         "personal details about named swimmers; grounds claims in "
+                         "the meet digest."),
             blocked_input_messaging="Input blocked by guardrail.",
             blocked_outputs_messaging="Output blocked by guardrail.",
             topic_policy_config=bedrock.CfnGuardrail.TopicPolicyConfigProperty(
@@ -60,6 +64,24 @@ class SwimtrendsEvaluationStack(Stack):
                         examples=[
                             "En skødesløs vending kostede hende sejren.",
                             "Han gav tydeligvis op på sidste længde.",
+                        ]),
+                    # A denied topic, not a SensitiveInformationPolicyConfig PII
+                    # filter: swimmer names are already public on the site and
+                    # wanted in the prose, so a NAME entity filter would defeat
+                    # the feature; an AGE entity filter risks flagging
+                    # legitimate aggregate statements (the digest carries a
+                    # `juniors` count, and junior categories are age-band
+                    # defined). Denying the topic is the targeted tool here.
+                    bedrock.CfnGuardrail.TopicConfigProperty(
+                        name="PersonalDetails", type="DENY",
+                        definition=("Personal or identifying details about a named "
+                                    "athlete beyond their club affiliation: age, "
+                                    "birth year, year group, school or education, "
+                                    "family, home address or town of residence, "
+                                    "employment, or any other private-life detail."),
+                        examples=[
+                            "Hun er 16 år og går i 9. klasse på Ordrup Skole.",
+                            "Han er født i 2009 og bor i Aarhus med sin familie.",
                         ]),
                 ]),
             contextual_grounding_policy_config=(
