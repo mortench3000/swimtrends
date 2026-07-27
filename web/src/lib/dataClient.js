@@ -17,3 +17,8 @@ export const getMeets = (cat) => get(`${cat}/meets.json`)
 export const getMeet = (cat, meetId) => get(`${cat}/${meetId}/meet.json`)
 export const getRaces = (cat, meetId) => get(`${cat}/${meetId}/races.json`)
 export const getRace = (cat, meetId, raceKey) => get(`${cat}/${meetId}/${raceKey}.json`)
+
+// Absent evaluation is normal: generation is best-effort and a failed meet
+// simply has no file. Resolve null so the page renders without the section.
+export const getEvaluation = (cat, meetId) =>
+  get(`${cat}/${meetId}/evaluation.json`).catch(() => null)

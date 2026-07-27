@@ -1,0 +1,15 @@
+{
+  "category": "DM-L",
+  "meet_id": "M2026",
+  "prompt_version": "1",
+  "schema_version": "1",
+  "model_id": "test-model",
+  "model_label": "Testmodel",
+  "generated_at": "2026-07-27",
+  "sections": [
+    {"heading": "Samlet niveau", "body": "Median-pointniveauet lå over de fem foregående sæsoner."},
+    {"heading": "Bredde", "body": "412 deltagere fra 58 klubber."},
+    {"heading": "Fremhævede svømninger", "body": "Emma Sørensen svømmede 200 Fly i 2:11.40 (812 point)."},
+    {"heading": "Discipliner i bevægelse", "body": "Bryst-distancerne løftede niveauet."}
+  ]
+}
