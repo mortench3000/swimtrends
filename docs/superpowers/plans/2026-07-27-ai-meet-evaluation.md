@@ -347,15 +347,18 @@ _JUNIOR_ELITE_SQL = """
     SELECT season, CAST(quantile_cont(pts, 0.5) AS BIGINT) AS elite_median_points
     FROM ranked WHERE rk <= 10 GROUP BY season
 """
+```
 
+> **Corrected during execution.** An earlier draft of this plan defined a local
+> `_meet_is_combined` here that hardcoded `"DM-L" in cats and "DMJ-L" in cats`.
+> That diverges from `webbuild/queries.py`'s predicate ("any non-`DMJ*` tag AND
+> any `DMJ*` tag"), so a meet tagged e.g. `["DO", "DMJ-L"]` would be junior-scoped
+> on the meet page but senior-scoped in the digest — the evaluation would describe
+> a different field than the page shows. Import the existing predicate instead, so
+> the two cannot drift:
 
-def _meet_is_combined(con, meet_id: str) -> bool:
-    """True when this meet is tagged both DM-L and DMJ-L, i.e. a combined
-    senior+junior championship whose junior title comes from junior_championship."""
-    cats = con.execute(
-        "SELECT any_value(category) FROM cur_dim_meet WHERE meet_id = ?",
-        [meet_id]).fetchone()[0] or []
-    return "DM-L" in cats and "DMJ-L" in cats
+```python
+from webbuild.queries import _meet_is_combined
 
 
 def build(con, category: str, meet_id: str) -> dict:
