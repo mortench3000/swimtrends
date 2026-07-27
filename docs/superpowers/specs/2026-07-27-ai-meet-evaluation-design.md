@@ -175,8 +175,15 @@ about times. What it must never add is judgement about people.
 
 Enforced in two places, prompt and guardrail:
 
-**Allowed** — results-grounded statements only: time, points, placement,
-improvement against a swimmer's own prior best.
+**Allowed** — results-grounded statements only: time, points, placement, event.
+
+> **Corrected during implementation.** This line originally also allowed
+> "improvement against a swimmer's own prior best". The digest has no such field
+> — `top_swims` rows are `name/club/event/time/points/rank`, and `derived` holds
+> meet-level deltas only — so the claim cannot be grounded and the system prompt
+> does not authorise it. Adding it later means adding a per-swimmer prior-best to
+> the digest first (the `personal_best` analytics view already exists), not
+> loosening the prompt.
 
 **Blocked** — talent or future projections ("et kommende OL-emne"); technique,
 body, health, injury or training speculation ("virker utrænet på de sidste 50
