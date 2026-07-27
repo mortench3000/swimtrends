@@ -16,7 +16,7 @@ from aws_cdk import CfnOutput, Stack
 from aws_cdk import aws_bedrock as bedrock
 from constructs import Construct
 
-GROUNDING_THRESHOLD = 0.7
+GROUNDING_THRESHOLD = 0.85
 RELEVANCE_THRESHOLD = 0.5
 
 
@@ -93,10 +93,20 @@ class SwimtrendsEvaluationStack(Stack):
                     ])),
         )
 
+        # A published guardrail VERSION is immutable: editing the guardrail's
+        # properties (e.g. GROUNDING_THRESHOLD above) only updates the DRAFT.
+        # CfnGuardrailVersion is a separate resource that CloudFormation only
+        # replaces (publishing a new version) when ITS OWN properties change.
+        # Embedding the threshold values in this description is what makes a
+        # threshold change actually take effect — do not "tidy" this back to
+        # a static string, or the batch job's pinned version silently keeps
+        # serving the old thresholds forever.
         version = bedrock.CfnGuardrailVersion(
             self, "EvaluationGuardrailVersion",
             guardrail_identifier=guardrail.attr_guardrail_id,
-            description="Published version consumed by the evaluation batch job.")
+            description=(
+                "Published version consumed by the evaluation batch job "
+                f"(grounding={GROUNDING_THRESHOLD}, relevance={RELEVANCE_THRESHOLD})."))
 
         CfnOutput(self, "GuardrailId", value=guardrail.attr_guardrail_id)
         CfnOutput(self, "GuardrailVersion", value=version.attr_version)

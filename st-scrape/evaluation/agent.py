@@ -28,7 +28,9 @@ HEADINGS = (
 
 # Human-readable label shown in the page footer next to the generation date.
 # Extend as models are added; unmapped ids fall back to the raw id.
-MODEL_LABELS: dict[str, str] = {}
+MODEL_LABELS: dict[str, str] = {
+    "eu.anthropic.claude-haiku-4-5-20251001-v1:0": "Claude Haiku 4.5",
+}
 
 SYSTEM_PROMPT = f"""\
 You are an experienced Danish swimming coach writing a short evaluation of a

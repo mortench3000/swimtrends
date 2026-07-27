@@ -146,6 +146,26 @@ offline and cached. `make web-eval` fills the cache and writes
 `web/public/data/<cat>/<meet>/evaluation.json`; `make web-refresh` runs it
 between `webbuild` and the S3 sync.
 
+### Model choice
+
+Four candidates were compared with `evaluation/compare.py` on three meets —
+a large senior LCM championship, the same meet junior-scoped, and the
+earliest meet on record (no prior season history):
+
+| model | numbers | $/meet | note |
+|---|---|---|---|
+| Claude Haiku 4.5 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`) | ok ×3 | ~$0.0069 | **chosen** — the only candidate with a genuine coach voice |
+| Nova 2 Lite (`eu.amazon.nova-2-lite-v1:0`) | ok ×3 | ~$0.0021 | accurate but reads like a narrated table |
+| Ministral 3 8B (`mistral.ministral-3-8b-instruct`) | 1 of 3 | ~$0.0010 | fabricated figures; broken Danish |
+| Claude Sonnet 5 (`eu.anthropic.claude-sonnet-5`) | — | — | not available for this account |
+
+`EVAL_MODEL_ID` should be set to the chosen Haiku id above.
+
+The guardrail's contextual grounding threshold is 0.85 (raised from 0.7):
+at 0.7, the contextual grounding check did not catch a model inferring
+geographic spread from a bare club count — a claim the deterministic number
+check can't see either, since it isn't a number.
+
 Config (all three required; the guardrail values come from the
 `SwimtrendsEvaluationStack` outputs):
 

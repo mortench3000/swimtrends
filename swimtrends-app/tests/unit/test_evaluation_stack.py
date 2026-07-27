@@ -32,7 +32,7 @@ def test_guardrail_has_grounding_and_relevance_thresholds():
     _template().has_resource_properties("AWS::Bedrock::Guardrail", {
         "ContextualGroundingPolicyConfig": {
             "FiltersConfig": assertions.Match.array_with([
-                {"Type": "GROUNDING", "Threshold": 0.7},
+                {"Type": "GROUNDING", "Threshold": 0.85},
                 {"Type": "RELEVANCE", "Threshold": 0.5},
             ])
         }
@@ -42,6 +42,18 @@ def test_guardrail_has_grounding_and_relevance_thresholds():
 def test_a_numbered_version_is_published():
     t = _template()
     t.resource_count_is("AWS::Bedrock::GuardrailVersion", 1)
+
+
+def test_version_description_embeds_the_grounding_threshold():
+    """A published guardrail VERSION is immutable — CloudFormation only
+    replaces it (publishing a new version) when its OWN properties change.
+    The threshold value must live in the version's description, or a future
+    threshold change would silently keep the batch job on the old value."""
+    t = _template()
+    versions = t.find_resources("AWS::Bedrock::GuardrailVersion")
+    assert versions, "no guardrail version in the template"
+    for res in versions.values():
+        assert "0.85" in res["Properties"]["Description"]
 
 
 def test_outputs_expose_the_id_and_version():
