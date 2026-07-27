@@ -24,6 +24,9 @@ and for the two follow-on pieces (incremental webbuild, automated data refresh).
 - A `workflow_dispatch` button. Add it when an app-only redeploy is actually
   wanted without a commit.
 - Deploying the CDK stacks from CI. Infra deploys stay manual and confirmed.
+- Deploying the other four stacks to land the `aws-cdk-lib` upgrade. They pick it
+  up whenever they are next deployed; `cdk diff` is reviewed for all five, but
+  only `SwimtrendsWebStack` is deployed here.
 - Removing the local deploy path. `make web-deploy` remains the escape hatch.
 
 ## Architecture
@@ -32,6 +35,7 @@ Three changed surfaces:
 
 | Surface | Change |
 | --- | --- |
+| `swimtrends-app/requirements.txt` | `aws-cdk-lib` 2.257.0 → 2.262.1 |
 | `swimtrends-app/swimtrends_app/swimtrends_web_stack.py` | GitHub OIDC provider + scoped deploy role, role-ARN output |
 | `.github/workflows/ci.yml` | new; tests on PR, tests + deploy on push to `master` |
 | `Makefile` | `AWS_PROFILE_FLAG` variable so CI can run `web-deploy` credential-free |
@@ -45,6 +49,43 @@ merge     ──> ci.yml (test job, then deploy) ── OIDC ──> assume GitH
                                                                └─ aws cloudfront create-invalidation "/*"
 ```
 
+### 0. Upgrade aws-cdk-lib first
+
+Pinned **2.257.0**, latest **2.262.1**. Do the upgrade as the first commit on the
+branch, before writing any new CDK code, so an upgrade-induced template change
+can never be confused with a change the deploy role caused.
+
+Release notes for 2.258.0 → 2.262.1 reviewed (2026-07-27). The breaking changes
+in that range are all in constructs this repo does not use: classic
+ElasticLoadBalancing (`Id` → `LoadBalancerName`), CloudWatch `LogAlarm`
+(`QueryLanguage` removed), Lambda `Runtime.NODEJS_LATEST` (now Node 24 — every
+Lambda here pins `PYTHON_3_12`), EKS AL2023, and PCA connector L1s. Two changes
+*will* show up when synthesizing:
+
+- **2.261.0** adds git source metadata to synthesized templates. Expect a
+  `Metadata` diff on **every** stack, unrelated to any code change.
+- **2.262.0** validates templates against a default rule set at synth time, and
+  2.262.1 fixed `CDK_VALIDATION=false` not disabling it. New warnings or errors
+  may surface on stacks that synthesized cleanly before.
+
+Also relevant but not required: `aws-cdk` **CLI** latest is 2.1133.0 (CLAUDE.md
+and `docs/superpowers/deploy-web.md` document 2.1125.0). Bump those two
+references in the same commit — documentation only, nothing executes it.
+
+Verification for this step, before writing any new code:
+
+1. `pip install -r requirements.txt` in `swimtrends-app/.venv`.
+2. `.venv/bin/python -m pytest tests/unit` — the existing CDK assertion suite
+   must stay green.
+3. `cdk diff` (node 22, `--app ".venv/bin/python3 app.py"`, `-c alert_email=…`)
+   on **all five stacks** and read the output. Metadata-only churn is expected
+   and fine. Anything touching a resource property is a stop-and-look — report
+   it rather than deploying through it.
+
+No stack is deployed in this step. The upgrade rides along with the web-stack
+deploy in Sequencing below; the other four stacks pick up the new library
+version whenever they are next deployed for their own reasons.
+
 ### 1. AWS identity (CDK)
 
 Defined in `SwimtrendsWebStack`, where the `bucket` and `distribution`
@@ -53,8 +94,8 @@ constructs already exist — scoping needs no cross-stack references.
 - `iam.CfnOIDCProvider` for `https://token.actions.githubusercontent.com`,
   client id `sts.amazonaws.com`. Use the L1 construct, not `OpenIdConnectProvider`
   — the L2 synths a custom resource with its own Lambda, while the L1 is the
-  native `AWS::IAM::OIDCProvider` (verified available in the pinned
-  `aws-cdk-lib`). The account currently has **no** OIDC provider (verified
+  native `AWS::IAM::OIDCProvider` (verified present in 2.257.0, so it is also in
+  2.262.1). The account currently has **no** OIDC provider (verified
   2026-07-27), so creating one will not collide.
 - `iam.Role` (`GitHubDeployRole`) with a `FederatedPrincipal` on that provider's
   ARN, conditioned on:
@@ -147,17 +188,20 @@ equivalent to an absent one) and belongs to the data-refresh piece.
 
 The role must exist before the first master run of the workflow:
 
-1. Implement all three surfaces on a branch; CDK test green, both suites green.
-2. **Deploy `SwimtrendsWebStack`** with `-c alert_email=<address>` (manual, and
-   confirmed first — it is an infra deploy that touches the live distribution).
-   Note the role ARN from the output.
-3. Store the role ARN as the GitHub **repo variable** `AWS_DEPLOY_ROLE_ARN` and
+1. Upgrade `aws-cdk-lib` and verify per section 0 (CDK suite green, `cdk diff`
+   reviewed on all five stacks). Separate commit.
+2. Implement the other three surfaces on the same branch; CDK test green, both
+   test suites green.
+3. **Deploy `SwimtrendsWebStack`** with `-c alert_email=<address>` (manual, and
+   confirmed first — it is an infra deploy that touches the live distribution,
+   and it carries the library upgrade). Note the role ARN from the output.
+4. Store the role ARN as the GitHub **repo variable** `AWS_DEPLOY_ROLE_ARN` and
    reference it as `${{ vars.AWS_DEPLOY_ROLE_ARN }}`. Not inline: the ARN
    contains the account id, and CLAUDE.md forbids hardcoding it in new files
    because this repo is public. A variable (not a secret) — it needs no masking,
    only to stay out of the tree.
-4. Open the PR. Its check run proves the test path.
-5. Merge. Watch the run; confirm the deploy path.
+5. Open the PR. Its check run proves the test path.
+6. Merge. Watch the run; confirm the deploy path.
 
 ## Documentation
 
@@ -165,3 +209,5 @@ The role must exist before the first master run of the workflow:
   post-merge manual step becomes `make web-refresh` only when the curated zone
   moved; `make web-release` is no longer the default.
 - `docs/superpowers/deploy-web.md`: same, plus how to re-run or fall back.
+- Both files' pinned `npx aws-cdk@2.1125.0` → `2.1133.0` (part of the upgrade
+  commit).
