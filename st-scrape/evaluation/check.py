@@ -55,6 +55,10 @@ def _walk(obj, out: set[str]) -> None:
         if re.fullmatch(r"\d+:\d{1,2}[.,]\d{1,2}", obj):
             # A time string licenses its variants
             out |= _time_variants(obj)
+        elif re.fullmatch(r"\d{1,2}[.,]\d{1,2}", obj):
+            # A bare M.SS swim time (no minute component — sub-minute races,
+            # e.g. curated 50/100m times like "24.66") licenses itself.
+            out.add(_norm(obj))
         else:
             # Only extract the distance from event labels (e.g., "F 200m Fly (LCM)" → 200).
             # Ignore dates, swimmer names, club names, and other free text.
@@ -72,6 +76,14 @@ def allowed_numbers(digest: dict) -> set[str]:
     window_size = len(digest.get("season_history", []))
     out.add(str(window_size))
     out.add(str(max(window_size - 1, 0)))
+    # meet.name is the meet's own title as shown on the page (e.g. "DM
+    # Kortbane 2016") — a model naturally quotes it, so its digits are
+    # licensed. meet.date is deliberately NOT walked this way: that string
+    # licensing bare date components (e.g. "10" from "2026-04-10") as
+    # fabricated medal/count numbers was the original leak this guard fixed.
+    name = digest.get("meet", {}).get("name")
+    if isinstance(name, str):
+        out.update(re.findall(r"\d+", name))
     return out
 
 

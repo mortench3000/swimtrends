@@ -81,3 +81,29 @@ def test_danish_thousands_separator_matches_a_four_digit_digest_value():
     assert check.check_numbers("Topsvømmeren fik 1.234 point.", d) == set()
     # Decimals absent from digest should still be caught
     assert check.check_numbers("Hun svømmede 2,50 sekunder hurtigere.", DIGEST) == {"2.50"}
+
+
+def test_bare_sprint_time_from_top_swims_is_licensed():
+    """Sub-minute races (50m/100m) have no minute component in curated data
+    (e.g. "24.66", not "0:24.66") — the time check must still license them."""
+    d = {**DIGEST, "top_swims": [{"name": "Ida Møller", "club": "AGF",
+                                   "event": "F 50m Fri (LCM)", "time": "24.66",
+                                   "points": 700, "rank": 1}]}
+    assert check.check_numbers("Han svømmede 24.66.", d) == set()
+    assert check.check_numbers("Han svømmede 24,66.", d) == set()   # Danish comma
+
+
+def test_near_miss_sprint_time_is_still_caught():
+    """Licensing must key on the digest's actual value, not merely the
+    bare-time shape — a wrong time is still fabricated."""
+    d = {**DIGEST, "top_swims": [{"name": "Ida Møller", "club": "AGF",
+                                   "event": "F 50m Fri (LCM)", "time": "24.66",
+                                   "points": 700, "rank": 1}]}
+    assert check.check_numbers("Han svømmede 24.67.", d) == {"24.67"}
+
+
+def test_meet_name_year_is_licensed():
+    """meet.name is the meet's own displayed title (e.g. "DM Kortbane 2016")
+    — a model naturally quotes it, so its digits must be licensed."""
+    d = {**DIGEST, "meet": {**DIGEST["meet"], "name": "DM Kortbane 2016"}}
+    assert check.check_numbers("Rekorden faldt ved DM Kortbane 2016.", d) == set()
