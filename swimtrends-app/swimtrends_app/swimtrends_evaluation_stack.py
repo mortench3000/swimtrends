@@ -1,0 +1,81 @@
+"""Guardrail for the AI meet evaluations.
+
+The evaluations are batch-generated prose about named swimmers — many of them
+16-18 year olds at the junior championships. The guardrail is the enforcement
+half of that policy (the system prompt is the cooperative half): it denies
+talent projection, physique/health speculation and personal criticism, and runs
+a contextual grounding check with the meet digest as the grounding source.
+
+Applied inline on the Converse call at the NUMBERED version below — never
+DRAFT, which could change between two meets of the same batch.
+"""
+from aws_cdk import CfnOutput, Stack
+from aws_cdk import aws_bedrock as bedrock
+from constructs import Construct
+
+GROUNDING_THRESHOLD = 0.7
+RELEVANCE_THRESHOLD = 0.5
+
+
+class SwimtrendsEvaluationStack(Stack):
+
+    def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
+        super().__init__(scope, construct_id, **kwargs)
+
+        guardrail = bedrock.CfnGuardrail(
+            self, "EvaluationGuardrail",
+            name="swimtrends-meet-evaluation",
+            description=("Guardrail for batch-generated Danish coach evaluations "
+                         "of swim meets. Denies projection, physique/health and "
+                         "personal criticism about named swimmers; grounds every "
+                         "claim in the meet digest."),
+            blocked_input_messaging="Input blocked by guardrail.",
+            blocked_outputs_messaging="Output blocked by guardrail.",
+            topic_policy_config=bedrock.CfnGuardrail.TopicPolicyConfigProperty(
+                topics_config=[
+                    bedrock.CfnGuardrail.TopicConfigProperty(
+                        name="TalentProjection", type="DENY",
+                        definition=("Predictions, projections or speculation about a "
+                                    "named athlete's future performance, potential, "
+                                    "career prospects or selection for teams or "
+                                    "championships."),
+                        examples=[
+                            "Hun er et kommende OL-emne.",
+                            "Han bliver landsholdssvømmer inden for to år.",
+                        ]),
+                    bedrock.CfnGuardrail.TopicConfigProperty(
+                        name="PhysiqueAndHealth", type="DENY",
+                        definition=("Statements or speculation about a named athlete's "
+                                    "body, physique, weight, health, injuries, illness, "
+                                    "fitness, training load or technique."),
+                        examples=[
+                            "Han virker utrænet på de sidste 50 meter.",
+                            "Hendes skulderskade præger svømningen.",
+                        ]),
+                    bedrock.CfnGuardrail.TopicConfigProperty(
+                        name="PersonalCriticism", type="DENY",
+                        definition=("Criticism, blame, mockery or disparagement "
+                                    "directed at a named person, including their "
+                                    "execution, effort, attitude or choices."),
+                        examples=[
+                            "En skødesløs vending kostede hende sejren.",
+                            "Han gav tydeligvis op på sidste længde.",
+                        ]),
+                ]),
+            contextual_grounding_policy_config=(
+                bedrock.CfnGuardrail.ContextualGroundingPolicyConfigProperty(
+                    filters_config=[
+                        bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
+                            type="GROUNDING", threshold=GROUNDING_THRESHOLD),
+                        bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
+                            type="RELEVANCE", threshold=RELEVANCE_THRESHOLD),
+                    ])),
+        )
+
+        version = bedrock.CfnGuardrailVersion(
+            self, "EvaluationGuardrailVersion",
+            guardrail_identifier=guardrail.attr_guardrail_id,
+            description="Published version consumed by the evaluation batch job.")
+
+        CfnOutput(self, "GuardrailId", value=guardrail.attr_guardrail_id)
+        CfnOutput(self, "GuardrailVersion", value=version.attr_version)

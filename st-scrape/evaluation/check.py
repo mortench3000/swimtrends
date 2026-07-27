@@ -40,32 +40,52 @@ def _walk(obj, out: set[str]) -> None:
     elif isinstance(obj, bool) or obj is None:
         return
     elif isinstance(obj, (int, float)):
-        out.add(_norm(str(obj)))
+        normalized = _norm(str(obj))
+        out.add(normalized)
         # An int is also licensed with its sign stripped: derived deltas are
         # negative in the digest but prose says "3% under".
         out.add(_norm(str(abs(obj))))
+        # For 4+ digit integers, also allow Danish thousands-grouped form
+        # (e.g., 1234 → also allow 1.234)
+        if isinstance(obj, int) and abs(obj) >= 1000:
+            # Format with thousands separator: 1234 → "1.234"
+            grouped = f"{abs(obj):,}".replace(",", ".")
+            out.add(grouped)
     elif isinstance(obj, str):
         if re.fullmatch(r"\d+:\d{1,2}[.,]\d{1,2}", obj):
+            # A time string licenses its variants
             out |= _time_variants(obj)
         else:
-            # Free text (names, event labels, dates) contributes its numbers:
-            # an event label like "F 200m Fly (LCM)" licenses 200.
-            for tok in _TOKEN.findall(obj):
-                out.add(_norm(tok))
+            # Only extract the distance from event labels (e.g., "F 200m Fly (LCM)" → 200).
+            # Ignore dates, swimmer names, club names, and other free text.
+            m = re.search(r"(\d+)m\b", obj)
+            if m:
+                out.add(m.group(1))
 
 
 def allowed_numbers(digest: dict) -> set[str]:
     out: set[str] = set()
     _walk(digest, out)
-    # The size of the comparison window itself ("de sidste 5 sæsoner").
-    out.add("5")
-    out.add(str(len(digest.get("season_history", []))))
-    out.add(str(max(len(digest.get("season_history", [])) - 1, 0)))
+    # The size of the comparison window itself: how many prior seasons are
+    # included in the digest. If season_history has 6 entries, then "5" (the
+    # number of prior seasons) and "6" (the window size) are both licensable.
+    window_size = len(digest.get("season_history", []))
+    out.add(str(window_size))
+    out.add(str(max(window_size - 1, 0)))
     return out
 
 
 def numbers_in_text(text: str) -> set[str]:
-    return {_norm(t) for t in _TOKEN.findall(text or "")}
+    out: set[str] = set()
+    for token in _TOKEN.findall(text or ""):
+        normalized = _norm(token)
+        out.add(normalized)
+        # Handle Danish thousands separators: if a token looks like 1.234
+        # (1-3 digits, then one or more groups of .DDD), add the ungrouped form too.
+        if re.fullmatch(r"\d{1,3}(\.\d{3})+", token):
+            ungrouped = token.replace(".", "")
+            out.add(ungrouped)
+    return out
 
 
 def check_numbers(text: str, digest: dict) -> set[str]:
