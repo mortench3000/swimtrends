@@ -37,12 +37,12 @@ _EVENTS = [
 ]
 
 
-def digest_con() -> duckdb.DuckDBPyConnection:
-    """DM-L, seasons 2021..2026. Six swimmers per event; points climb with
+def _dm_l_con(seasons) -> duckdb.DuckDBPyConnection:
+    """DM-L, the given seasons. Six swimmers per event; points climb with
     season (base 400 + 20 per season past 2021) so medians differ per season,
     and swimmer index shifts points so top_swims has a stable order."""
     obt, meets = [], []
-    for season in range(2021, 2027):
+    for season in seasons:
         mid = f"D{season}"
         name = f"Danish Champs {season}"
         mdate = f"{season}-04-10"
@@ -67,6 +67,18 @@ def digest_con() -> duckdb.DuckDBPyConnection:
     build_curated(con, obt=obt, meets=meets, splits=[])
     create_views(con)
     return con
+
+
+def digest_con() -> duckdb.DuckDBPyConnection:
+    """DM-L, seasons 2021..2026 (no gaps)."""
+    return _dm_l_con(range(2021, 2027))
+
+
+def gapped_digest_con() -> duckdb.DuckDBPyConnection:
+    """DM-L with a season gap at 2023-2024, to exercise the on-record window:
+    season_history and by_stroke must both skip the gap, not count back 5
+    calendar years from the meet's season."""
+    return _dm_l_con([2019, 2020, 2021, 2022, 2025, 2026])
 
 
 def junior_digest_con() -> duckdb.DuckDBPyConnection:

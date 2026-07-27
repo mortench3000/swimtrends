@@ -1,4 +1,4 @@
-from tests.evaluation_fixtures import digest_con, junior_digest_con
+from tests.evaluation_fixtures import digest_con, gapped_digest_con, junior_digest_con
 from webbuild import digest
 
 
@@ -90,3 +90,24 @@ def test_derived_holds_rounded_percentage_deltas():
 def test_derived_is_empty_for_a_meet_with_no_prior_seasons():
     d = digest.build(digest_con(), "DM-L", "D2021")
     assert d["derived"] == {}
+
+
+def test_by_stroke_window_matches_season_history_across_a_gap():
+    """A category with a season gap must not fall back to calendar arithmetic:
+    by_stroke's prev5_median has to pool the same on-record seasons that
+    season_history reports, or the published 'vs the prior five seasons'
+    comparison quotes a narrower window than it claims."""
+    con = gapped_digest_con()
+    d = digest.build(con, "DM-L", "D2026")
+    assert [r["season"] for r in d["season_history"]] == [2026, 2025, 2022, 2021, 2020, 2019]
+    # prev5_median must reflect 2019-2022 + 2025, not just 2021/2022/2025
+    ryg = next(r for r in d["by_stroke"] if r["stroke"] == "Ryg")
+    assert ryg["prev5_median"] == 481
+
+
+def test_junior_path_top_swims_and_by_stroke_report_juniors_only():
+    d = digest.build(junior_digest_con(), "DMJ-L", "J2026")
+    names = [s["name"] for s in d["top_swims"]]
+    assert names and all(n.startswith("Junior") for n in names)   # no seniors
+    assert all(s["rank"] >= 1 for s in d["top_swims"])             # junior_rank
+    assert [r["stroke"] for r in d["by_stroke"]] == ["Fri"]

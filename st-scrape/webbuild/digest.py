@@ -128,20 +128,25 @@ _JUNIOR_TOP_SWIMS_SQL = f"""
            junior_rank AS rank
     FROM junior_championship
     WHERE meet_id = ? AND points IS NOT NULL
+    -- Defensive, not load-bearing: junior_championship already filters to
+    -- phase IN ('heats', 'timed_final'), so a junior appears at most once
+    -- per event here; this mirrors the senior query's dedup for symmetry.
     QUALIFY row_number() OVER (
         PARTITION BY swimmer_id, gender, distance, stroke, course
         ORDER BY points DESC) = 1
     ORDER BY points DESC LIMIT {TOP_N}
 """
 
-# median points this season vs the mean of the prior seasons in the window,
-# per stroke x distance group. params: category, season, season, season, season
+# median points this season vs the mean of the prior seasons in the window.
+# `oldest` is history[-1]["season"] — the on-record window already computed
+# for season_history — NOT season - 5, since a category may have gaps.
+# per stroke x distance group. params: category, oldest, season, season, season
 _BY_STROKE_SQL = f"""
     WITH best AS (
         SELECT season, stroke, {_DIST_GROUP} AS dist_group, swimmer_id,
                gender, distance, course, max(points) AS pts
         FROM results_by_category
-        WHERE category = ? AND season BETWEEN ? - 5 AND ? AND class = 'open'
+        WHERE category = ? AND season BETWEEN ? AND ? AND class = 'open'
           AND points IS NOT NULL AND swimmer_id IS NOT NULL
         GROUP BY season, stroke, dist_group, swimmer_id, gender, distance, course
     )
@@ -156,13 +161,13 @@ _BY_STROKE_SQL = f"""
     ORDER BY stroke, dist_group
 """
 
-# params: season, season, season, season
+# params: oldest, season, season, season
 _JUNIOR_BY_STROKE_SQL = f"""
     WITH best AS (
         SELECT season, stroke, {_DIST_GROUP} AS dist_group, swimmer_id,
                gender, distance, course, max(points) AS pts
         FROM junior_championship
-        WHERE season BETWEEN ? - 5 AND ? AND points IS NOT NULL
+        WHERE season BETWEEN ? AND ? AND points IS NOT NULL
         GROUP BY season, stroke, dist_group, swimmer_id, gender, distance, course
     )
     SELECT stroke, dist_group,
@@ -224,16 +229,20 @@ def build(con, category: str, meet_id: str) -> dict:
     for h in history:
         h["elite_median_points"] = elite.get(h["season"])
 
+    # by_stroke must use the SAME on-record window as season_history — a
+    # category with a gap makes calendar arithmetic (season - 5) wrong.
+    oldest = history[-1]["season"] if history else season
+
     swim_cols = ["name", "club", "event", "time", "points", "rank"]
     stroke_cols = ["stroke", "dist_group", "median_points", "prev5_median"]
     if junior:
         top = con.execute(_JUNIOR_TOP_SWIMS_SQL, [meet_id]).fetchall()
         strokes = con.execute(_JUNIOR_BY_STROKE_SQL,
-                              [season, season, season, season]).fetchall()
+                              [oldest, season, season, season]).fetchall()
     else:
         top = con.execute(_TOP_SWIMS_SQL, [category, meet_id]).fetchall()
         strokes = con.execute(_BY_STROKE_SQL,
-                              [category, season, season, season, season]).fetchall()
+                              [category, oldest, season, season, season]).fetchall()
 
     return {
         "meet": {"name": head[0], "date": head[1], "season": season,
