@@ -65,6 +65,10 @@ class SwimtrendsWebStack(Stack):
         # long-lived access keys live in GitHub. The sub condition is the
         # security boundary: only master-branch runs of this repo can assume
         # the role — a fork's PR cannot, and PR runs never ask for credentials.
+        # The OIDC provider is an account-level singleton, not scoped to this
+        # stack: a second stack adding its own would fail with
+        # EntityAlreadyExists, and destroying this stack would delete it out
+        # from under any other role trusting it.
         oidc = iam.CfnOIDCProvider(
             self, "GitHubOidcProvider",
             url=GITHUB_OIDC_URL,

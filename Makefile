@@ -29,7 +29,8 @@ web-refresh:
 
 # Full web release: run the SPA unit tests, then build+deploy the app, then
 # refresh the data. Stops at the first failure. (webbuild breakage surfaces in
-# web-refresh; st-scrape's pytest suite is not run here — use `make test`.)
+# web-refresh; st-scrape's pytest suite is not run here — run it directly with
+# `cd st-scrape && .venv/bin/python -m pytest -q`.)
 web-release:
 	cd web && npm test
 	$(MAKE) web-deploy

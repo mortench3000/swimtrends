@@ -45,6 +45,7 @@ Scraping and AWS commands need network + credentials.
 # Tests — always run before claiming done
 cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion (164)
 cd swimtrends-app  && .venv/bin/python -m pytest tests/unit # CDK assertions
+cd web             && npm test                              # SPA unit tests
 
 # Scrape one meet (writes db/<id>_*.jsonl locally)
 cd st-scrape && .venv/bin/python scrape_races.py 12486 DM-L DMJ-L

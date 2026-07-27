@@ -127,7 +127,7 @@ so later tasks know a failure is theirs.
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 cd swimtrends-app
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-cdk diff --app ".venv/bin/python3 app.py" -c alert_email=<your-address> 2>&1 | tee /tmp/cdk-diff-upgrade.txt
+npx aws-cdk@2.1133.0 diff --app ".venv/bin/python3 app.py" -c alert_email=<your-address> 2>&1 | tee /tmp/cdk-diff-upgrade.txt
 ```
 
 (No stack name diffs all of them. Docker must be running.)
@@ -614,7 +614,7 @@ Expected: all PASS. Report the actual counts.
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 cd swimtrends-app
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-cdk diff SwimtrendsWebStack --app ".venv/bin/python3 app.py" -c alert_email=<your-address>
+npx aws-cdk@2.1133.0 diff SwimtrendsWebStack --app ".venv/bin/python3 app.py" -c alert_email=<your-address>
 ```
 
 Expected: an added `AWS::IAM::OIDCProvider`, an added `AWS::IAM::Role` + policy,
@@ -628,7 +628,7 @@ stack.
 export NVM_DIR="$HOME/.nvm"; . "$NVM_DIR/nvm.sh"; nvm use 22
 cd swimtrends-app
 export AWS_PROFILE=swimtrends AWS_DEFAULT_REGION=eu-west-1 AWS_REGION=eu-west-1
-cdk deploy SwimtrendsWebStack --app ".venv/bin/python3 app.py" \
+npx aws-cdk@2.1133.0 deploy SwimtrendsWebStack --app ".venv/bin/python3 app.py" \
   -c alert_email=<your-address> --require-approval never
 ```
 
