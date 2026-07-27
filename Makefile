@@ -43,4 +43,11 @@ web-release:
 	$(MAKE) web-deploy
 	$(MAKE) web-refresh
 
-.PHONY: web-dev web-deploy web-refresh web-eval web-release
+
+# Compare candidate models on the same meets. Hand-run; reaches Bedrock.
+# e.g. make eval-models MEETS=DM-L/12486,DM-L/11902 MODELS=id1,id2
+eval-models:
+	cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m evaluation.compare \
+		--meets $(MEETS) --models $(MODELS)
+
+.PHONY: web-dev web-deploy web-refresh web-eval web-release eval-models

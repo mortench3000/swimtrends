@@ -1,0 +1,160 @@
+"""Side-by-side model comparison for the meet evaluation. Hand-run only.
+
+Runs the SAME agent configuration against the same digests with each candidate
+model, applies the deterministic number check, and writes an HTML page plus a
+stdout table of pass rate, tokens, cost and latency. A human reads the Danish
+and picks the winner; the number check then stays in the pipeline forever.
+
+Model ids and prices resolved 2026-07-27 from `aws bedrock list-foundation-models`
+/ `list-inference-profiles` (region eu-west-1, account `swimtrends`) and the AWS
+Price List API (the machine-readable backing data for the Bedrock pricing page:
+Anthropic models are billed through the `AmazonBedrockFoundationModels`
+marketplace offer, everything else through the `AmazonBedrock` offer;
+eu-west-1 tables fetched from pricing.us-east-1.amazonaws.com/offers/v1.0/aws/...).
+Two Claude tiers via their `eu.` cross-region inference profile (EU data
+residency), one Nova and one Mistral as cheap controls, both confirmed present
+directly in the eu-west-1 foundation-model list:
+
+    eu.anthropic.claude-sonnet-5                 $2.20/MTok in, $11.00/MTok out
+    eu.anthropic.claude-haiku-4-5-20251001-v1:0  $1.10/MTok in, $5.50/MTok out
+    eu.amazon.nova-lite-v1:0                     $0.069/MTok in, $0.276/MTok out
+    mistral.ministral-3-8b-instruct              $0.18/MTok in, $0.18/MTok out
+
+Account-level model access (a candidate can still fail its first Converse call
+with AccessDeniedException even though it is listed here) is NOT verified by
+this comment block — that only happens when the harness is actually run.
+
+Costs printed here are estimates from those figures; they are not billing data.
+"""
+import argparse
+import html
+import os
+import sys
+import time
+from pathlib import Path
+
+from analytics.loader import connect
+from evaluation import agent as ag
+from evaluation.check import check_numbers
+from webbuild import digest as dg
+
+# model_id -> (input $/MTok, output $/MTok), from the comment block above.
+PRICES: dict[str, tuple[float, float]] = {
+    "eu.anthropic.claude-sonnet-5": (2.20, 11.00),
+    "eu.anthropic.claude-haiku-4-5-20251001-v1:0": (1.10, 5.50),
+    "eu.amazon.nova-lite-v1:0": (0.069, 0.276),
+    "mistral.ministral-3-8b-instruct": (0.18, 0.18),
+}
+
+
+def _cost(model_id, tokens_in, tokens_out):
+    if model_id not in PRICES:
+        return None
+    pin, pout = PRICES[model_id]
+    return (tokens_in * pin + tokens_out * pout) / 1_000_000
+
+
+def _usage(result):
+    """Token usage off a Strands AgentResult, defensively: the metrics shape
+    varies by SDK version, so fall back to zeros rather than crashing a run."""
+    try:
+        u = result.metrics.accumulated_usage
+        return int(u.get("inputTokens", 0)), int(u.get("outputTokens", 0))
+    except Exception:
+        return 0, 0
+
+
+def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
+    digest = dg.build(con, category, meet_id)
+    agent = ag.build_agent(model_id=model_id, guardrail_id=guardrail_id,
+                           guardrail_version=guardrail_version)
+    from evaluation.cache import canonical_json
+    t0 = time.monotonic()
+    error, sections, offenders = None, [], set()
+    try:
+        result = agent(f"<digest>{canonical_json(digest)}</digest>",
+                       structured_output_model=ag.MeetEvaluation)
+        sections = [{"heading": s.heading, "body": s.body}
+                    for s in result.structured_output.sections]
+        offenders = check_numbers("\n".join(s["body"] for s in sections), digest)
+        tin, tout = _usage(result)
+    except Exception as e:                      # a candidate that errors is a result
+        error, tin, tout = f"{type(e).__name__}: {e}", 0, 0
+    return {
+        "category": category, "meet_id": meet_id, "model_id": model_id,
+        "seconds": round(time.monotonic() - t0, 1),
+        "tokens_in": tin, "tokens_out": tout,
+        "cost": _cost(model_id, tin, tout),
+        "offenders": sorted(offenders), "sections": sections, "error": error,
+    }
+
+
+def _html(rows) -> str:
+    out = ["<meta charset='utf-8'><title>Model comparison</title>",
+           "<style>body{font:15px/1.5 system-ui;max-width:1200px;margin:2rem auto}",
+           "table{border-collapse:collapse;margin-bottom:2rem}",
+           "td,th{border:1px solid #ccc;padding:4px 8px;text-align:left}",
+           ".bad{color:#b00}.cols{display:flex;gap:1.5rem;align-items:flex-start}",
+           ".col{flex:1;min-width:0}</style>",
+           f"<p>prompt_version={html.escape(ag.PROMPT_VERSION)}</p>",
+           "<table><tr><th>meet<th>model<th>numbers<th>in<th>out<th>$<th>s</tr>"]
+    for r in rows:
+        bad = "bad" if (r["offenders"] or r["error"]) else ""
+        verdict = r["error"] or (", ".join(r["offenders"]) if r["offenders"] else "ok")
+        cost = "-" if r["cost"] is None else f"{r['cost']:.4f}"
+        out.append(
+            f"<tr class='{bad}'><td>{html.escape(r['category'])}/{html.escape(r['meet_id'])}"
+            f"<td>{html.escape(r['model_id'])}<td>{html.escape(verdict)}"
+            f"<td>{r['tokens_in']}<td>{r['tokens_out']}<td>{cost}<td>{r['seconds']}</tr>")
+    out.append("</table>")
+
+    for meet in dict.fromkeys((r["category"], r["meet_id"]) for r in rows):
+        out.append(f"<h2>{html.escape(meet[0])}/{html.escape(meet[1])}</h2><div class='cols'>")
+        for r in [x for x in rows if (x["category"], x["meet_id"]) == meet]:
+            out.append(f"<div class='col'><h3>{html.escape(r['model_id'])}</h3>")
+            if r["error"]:
+                out.append(f"<p class='bad'>{html.escape(r['error'])}</p>")
+            for s in r["sections"]:
+                out.append(f"<h4>{html.escape(s['heading'])}</h4>"
+                           f"<p>{html.escape(s['body'])}</p>")
+            out.append("</div>")
+        out.append("</div>")
+    return "\n".join(out)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Compare models on meet evaluations.")
+    ap.add_argument("--meets", required=True, help="comma-separated CATEGORY/MEET_ID")
+    ap.add_argument("--models", required=True, help="comma-separated Bedrock model ids")
+    ap.add_argument("--out", type=Path, default=Path("db/model-eval.html"))
+    args = ap.parse_args(argv)
+
+    guardrail_id = os.environ.get("EVAL_GUARDRAIL_ID")
+    guardrail_version = os.environ.get("EVAL_GUARDRAIL_VERSION")
+    if not (guardrail_id and guardrail_version):
+        raise SystemExit("set EVAL_GUARDRAIL_ID and EVAL_GUARDRAIL_VERSION")
+
+    con = connect()
+    meets = [tuple(m.strip().split("/", 1)) for m in args.meets.split(",") if m.strip()]
+    rows = []
+    for category, meet_id in meets:
+        for model_id in [m.strip() for m in args.models.split(",") if m.strip()]:
+            print(f"… {category}/{meet_id} on {model_id}", flush=True)
+            rows.append(run_one(con, category, meet_id, model_id,
+                                guardrail_id, guardrail_version))
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    args.out.write_text(_html(rows), encoding="utf-8")
+
+    print(f"\n{'model':40} {'numbers':10} {'in':>7} {'out':>7} {'$/meet':>9} {'s':>6}")
+    for r in rows:
+        verdict = "ERROR" if r["error"] else ("FAIL" if r["offenders"] else "ok")
+        cost = "-" if r["cost"] is None else f"{r['cost']:.4f}"
+        print(f"{r['model_id'][:40]:40} {verdict:10} {r['tokens_in']:>7} "
+              f"{r['tokens_out']:>7} {cost:>9} {r['seconds']:>6}")
+    print(f"\nwrote {args.out}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
