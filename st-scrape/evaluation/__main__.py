@@ -44,7 +44,7 @@ def _parse_meets(spec: str) -> list[tuple[str, str]]:
         if "/" not in item:
             raise SystemExit(f"--meets entries must be CATEGORY/MEET_ID, got {item!r}")
         cat, mid = item.split("/", 1)
-        out.append((cat, mid))
+        out.append((cat.strip(), mid.strip()))
     return out
 
 
@@ -54,45 +54,56 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
     agent = None if dry_run else ag.build_agent(
         model_id=model_id, guardrail_id=guardrail_id,
         guardrail_version=guardrail_version)
-    stats = {"hit": 0, "generated": 0, "skipped": 0, "written": 0}
+    meet_list = meets or _all_meets(con)
+    stats = {"total": len(meet_list), "hit": 0, "generated": 0, "skipped": 0, "written": 0}
 
-    for category, meet_id in (meets or _all_meets(con)):
+    for category, meet_id in meet_list:
+        # One outer catch-all per meet: cache.get/put and write_json are not
+        # individually guarded below, so a transient S3 error (throttling, a
+        # permissions blip, a corrupted cached body) must not abort the whole
+        # batch — it should cost this meet only, same as a digest or evaluate
+        # failure. The two inner try/excepts keep their specific log messages;
+        # this one is the backstop for everything else.
         try:
-            digest = dg.build(con, category, meet_id)
-        except Exception:
-            log.exception("digest failed for %s/%s", category, meet_id)
-            stats["skipped"] += 1
-            continue
-
-        key = cache.cache_key(digest, prompt_version=ag.PROMPT_VERSION,
-                              schema_version=ag.SCHEMA_VERSION, model_id=model_id)
-        payload = None if force else cache.get(s3, category, meet_id, key)
-        if payload is not None:
-            stats["hit"] += 1
-        elif dry_run:
-            log.info("would generate %s/%s", category, meet_id)
-            stats["skipped"] += 1
-            continue
-        else:
             try:
-                sections = ag.evaluate(digest, agent=agent)
+                digest = dg.build(con, category, meet_id)
             except Exception:
-                log.exception("evaluation failed for %s/%s", category, meet_id)
+                log.exception("digest failed for %s/%s", category, meet_id)
                 stats["skipped"] += 1
                 continue
-            payload = {
-                "category": category, "meet_id": meet_id,
-                "prompt_version": ag.PROMPT_VERSION,
-                "schema_version": ag.SCHEMA_VERSION,
-                "model_id": model_id, "model_label": ag.model_label(model_id),
-                "generated_at": dt.date.today().isoformat(),
-                "sections": sections,
-            }
-            cache.put(s3, category, meet_id, key, payload)
-            stats["generated"] += 1
 
-        write_json(out / category / meet_id / "evaluation.json", payload)
-        stats["written"] += 1
+            key = cache.cache_key(digest, prompt_version=ag.PROMPT_VERSION,
+                                  schema_version=ag.SCHEMA_VERSION, model_id=model_id)
+            payload = None if force else cache.get(s3, category, meet_id, key)
+            if payload is not None:
+                stats["hit"] += 1
+            elif dry_run:
+                log.info("would generate %s/%s", category, meet_id)
+                stats["skipped"] += 1
+                continue
+            else:
+                try:
+                    sections = ag.evaluate(digest, agent=agent)
+                except Exception:
+                    log.exception("evaluation failed for %s/%s", category, meet_id)
+                    stats["skipped"] += 1
+                    continue
+                payload = {
+                    "category": category, "meet_id": meet_id,
+                    "prompt_version": ag.PROMPT_VERSION,
+                    "schema_version": ag.SCHEMA_VERSION,
+                    "model_id": model_id, "model_label": ag.model_label(model_id),
+                    "generated_at": dt.date.today().isoformat(),
+                    "sections": sections,
+                }
+                cache.put(s3, category, meet_id, key, payload)
+                stats["generated"] += 1
+
+            write_json(out / category / meet_id / "evaluation.json", payload)
+            stats["written"] += 1
+        except Exception:
+            log.exception("evaluation pipeline failed for %s/%s", category, meet_id)
+            stats["skipped"] += 1
 
     return stats
 
@@ -121,11 +132,24 @@ def main(argv=None):
             "set EVAL_GUARDRAIL_ID and EVAL_GUARDRAIL_VERSION "
             "(from the SwimtrendsEvaluationStack outputs)")
 
+    if args.meets is not None and not args.meets.strip():
+        raise SystemExit(
+            "--meets was given but empty (omit the flag to process all meets)")
+    meets = _parse_meets(args.meets) if args.meets is not None else None
+
     stats = run(connect(), args.out, model_id=args.model,
                 guardrail_id=guardrail_id, guardrail_version=guardrail_version,
-                meets=_parse_meets(args.meets) if args.meets else None,
-                force=args.force, dry_run=args.dry_run)
+                meets=meets, force=args.force, dry_run=args.dry_run)
     print("evaluations: " + ", ".join(f"{k}={v}" for k, v in stats.items()))
+
+    # A systemic failure (bad model id, revoked guardrail, expired creds) must
+    # not exit 0: web-refresh syncs with --delete right after this, and a
+    # silent 0/0 would delete every previously published evaluation from the
+    # site. Routine per-meet skips with a nonempty result still exit 0. A
+    # --dry-run never writes by design (it only reports hits/misses), so it is
+    # exempt — its zero-written outcome is expected, not a failure.
+    if not args.dry_run and stats["total"] > 0 and stats["written"] == 0:
+        return 1
     return 0
 
 

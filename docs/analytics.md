@@ -170,3 +170,12 @@ every meet on the next run.
 Every number in a published evaluation is checked against the digest
 (`evaluation/check.py`); a report that fails twice is dropped and the page
 renders without the section.
+
+A meet that fails during `web-eval` (digest error, a bad AI report, a
+transient S3 error) gets no `evaluation.json`; the `--delete` sync that
+follows then removes that meet's section from the live site until a later
+run succeeds — the page falls back to rendering without it, same as any
+other skip. If **every** meet fails — wrong `EVAL_MODEL_ID`, a revoked
+guardrail, expired credentials — `web-eval` exits non-zero on purpose, so
+`make` stops before the sync runs and no already-published evaluation is
+deleted.
