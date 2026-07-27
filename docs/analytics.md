@@ -138,3 +138,35 @@ individual swims only).
 - New meets are queryable the moment they are curated — no refresh step.
 - `category` (DM-L, DMJ-L, …) is meet-level; a meet in two categories pools into
   both in the field-evolution views.
+
+## AI meet evaluations
+
+Each meet page can carry a short Danish coach-style evaluation, generated
+offline and cached. `make web-eval` fills the cache and writes
+`web/public/data/<cat>/<meet>/evaluation.json`; `make web-refresh` runs it
+between `webbuild` and the S3 sync.
+
+Config (all three required; the guardrail values come from the
+`SwimtrendsEvaluationStack` outputs):
+
+```bash
+export EVAL_MODEL_ID=<bedrock model id>
+export EVAL_GUARDRAIL_ID=<guardrail id>
+export EVAL_GUARDRAIL_VERSION=<numbered version, never DRAFT>
+```
+
+Useful flags:
+
+- `--dry-run` — report cache hits and misses without calling the model.
+- `--meets DM-L/12486` — one meet (or a comma-separated list).
+- `--force` — regenerate and overwrite the cached text. This is the revoke
+  switch; the bucket is versioned, so the prior text is retained.
+
+The cache key is `sha256(digest + prompt_version + schema_version + model_id)`.
+Unchanged inputs reuse the stored text verbatim — bumping `PROMPT_VERSION` or
+`SCHEMA_VERSION` in `evaluation/agent.py`, or switching models, regenerates
+every meet on the next run.
+
+Every number in a published evaluation is checked against the digest
+(`evaluation/check.py`); a report that fails twice is dropped and the page
+renders without the section.

@@ -21,11 +21,18 @@ web-deploy:
 	aws s3 sync web/dist s3://$(WEB_BUCKET)/ --delete --exclude "data/*" $(AWS_PROFILE_FLAG)
 	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) --paths "/*" $(AWS_PROFILE_FLAG)
 
-# Regenerate the data JSON from the curated zone and push it
+# Regenerate the data JSON from the curated zone, add AI evaluations, and push
 web-refresh:
 	cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m webbuild --out ../web/public/data
+	$(MAKE) web-eval
 	aws s3 sync web/public/data s3://$(WEB_BUCKET)/data/ --delete --profile swimtrends
 	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) --paths "/data/*" --profile swimtrends
+
+# Fill the evaluation cache and emit evaluation.json (seconds on a cache hit).
+# Needs EVAL_MODEL_ID, EVAL_GUARDRAIL_ID, EVAL_GUARDRAIL_VERSION in the
+# environment — see docs/analytics.md. Does NOT sync; web-refresh does that.
+web-eval:
+	cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m evaluation --out ../web/public/data
 
 # Full web release: run the SPA unit tests, then build+deploy the app, then
 # refresh the data. Stops at the first failure. (webbuild breakage surfaces in
@@ -36,4 +43,4 @@ web-release:
 	$(MAKE) web-deploy
 	$(MAKE) web-refresh
 
-.PHONY: web-dev web-deploy web-refresh web-release
+.PHONY: web-dev web-deploy web-refresh web-eval web-release
