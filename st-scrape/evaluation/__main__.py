@@ -72,6 +72,15 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 stats["skipped"] += 1
                 continue
 
+            # A bogus or not-yet-curated meet id doesn't make dg.build raise
+            # -- it degrades to an all-zero/None digest. Don't spend a model
+            # call (or a cache entry) writing a report about zero swimmers.
+            if not digest["facts"]["entrants"]:
+                log.warning("empty digest for %s/%s (no scored swims) -- skipping",
+                            category, meet_id)
+                stats["skipped"] += 1
+                continue
+
             key = cache.cache_key(digest, prompt_version=ag.PROMPT_VERSION,
                                   schema_version=ag.SCHEMA_VERSION, model_id=model_id)
             payload = None if force else cache.get(s3, category, meet_id, key)

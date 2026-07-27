@@ -72,21 +72,31 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
     shape are all just a result with `error` set (or `usage_ok` False) rather
     than an exception — a single bad cell must not lose every other row
     already paid for in this run (digest-build and agent construction used to
-    sit outside this try, which meant a typo'd meet id aborted the whole batch)."""
+    sit outside this try, which meant a typo'd meet id aborted the whole batch).
+
+    A bogus or not-yet-curated meet id doesn't make dg.build raise — it
+    degrades to an all-zero/None digest (webbuild.digest tolerates a missing
+    meet by design, e.g. for an early-season meet with no prior history).
+    Asking a model to write a coach report about a meet with zero scored
+    swims wastes a call on nothing, so that's caught and skipped here too,
+    before any agent is built — same guard as evaluation/__main__.py's run()."""
     from evaluation.cache import canonical_json
     t0 = time.monotonic()
     error, sections, offenders = None, [], set()
     tin, tout, usage_ok = 0, 0, False
     try:
         digest = dg.build(con, category, meet_id)
-        agent = ag.build_agent(model_id=model_id, guardrail_id=guardrail_id,
-                               guardrail_version=guardrail_version)
-        result = agent(f"<digest>{canonical_json(digest)}</digest>",
-                       structured_output_model=ag.MeetEvaluation)
-        sections = [{"heading": s.heading, "body": s.body}
-                    for s in result.structured_output.sections]
-        offenders = check_numbers("\n".join(s["body"] for s in sections), digest)
-        tin, tout, usage_ok = _usage(result)
+        if not digest["facts"]["entrants"]:
+            error = f"empty digest: no scored swims for {category}/{meet_id}"
+        else:
+            agent = ag.build_agent(model_id=model_id, guardrail_id=guardrail_id,
+                                   guardrail_version=guardrail_version)
+            result = agent(f"<digest>{canonical_json(digest)}</digest>",
+                           structured_output_model=ag.MeetEvaluation)
+            sections = [{"heading": s.heading, "body": s.body}
+                        for s in result.structured_output.sections]
+            offenders = check_numbers("\n".join(s["body"] for s in sections), digest)
+            tin, tout, usage_ok = _usage(result)
     except Exception as e:                      # a candidate that errors is a result
         error = f"{type(e).__name__}: {e}"
     return {
@@ -96,6 +106,24 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
         "cost": _cost(model_id, tin, tout) if usage_ok else None,
         "offenders": sorted(offenders), "sections": sections, "error": error,
     }
+
+
+def _cells(r):
+    """(tokens_in, tokens_out, cost) display strings for one row, shared by
+    the HTML table and the stdout table so the two views can't drift apart.
+
+    Two different kinds of "we don't have a number" here, rendered
+    differently on purpose: an error (including the empty-digest skip above)
+    never got a result back, so we KNOW nothing was spent — "-". A call that
+    *succeeded* (sections + the number check both ran) but whose usage shape
+    couldn't be parsed (see _usage) is genuinely unknown, likely non-zero —
+    "?", never a silent 0 / $0.0000 that would look like a real, free call."""
+    if r["error"]:
+        return "-", "-", "-"
+    if not r["usage_ok"]:
+        return "?", "?", "?"
+    cost = "-" if r["cost"] is None else f"{r['cost']:.4f}"
+    return r["tokens_in"], r["tokens_out"], cost
 
 
 def _html(rows) -> str:
@@ -110,10 +138,7 @@ def _html(rows) -> str:
     for r in rows:
         bad = "bad" if (r["offenders"] or r["error"] or not r["usage_ok"]) else ""
         verdict = r["error"] or (", ".join(r["offenders"]) if r["offenders"] else "ok")
-        # An unread usage shape (see _usage) must render as "?", never as a
-        # silent 0 or $0.0000 that looks like a genuinely free/empty call.
-        tin, tout = (r["tokens_in"], r["tokens_out"]) if r["usage_ok"] else ("?", "?")
-        cost = "?" if not r["usage_ok"] else ("-" if r["cost"] is None else f"{r['cost']:.4f}")
+        tin, tout, cost = _cells(r)
         out.append(
             f"<tr class='{bad}'><td>{html.escape(r['category'])}/{html.escape(r['meet_id'])}"
             f"<td>{html.escape(r['model_id'])}<td>{html.escape(verdict)}"
@@ -168,8 +193,7 @@ def main(argv=None):
     print(f"\n{'model':40} {'numbers':10} {'in':>7} {'out':>7} {'$/meet':>9} {'s':>6}")
     for r in rows:
         verdict = "ERROR" if r["error"] else ("FAIL" if r["offenders"] else "ok")
-        tin, tout = (r["tokens_in"], r["tokens_out"]) if r["usage_ok"] else ("?", "?")
-        cost = "?" if not r["usage_ok"] else ("-" if r["cost"] is None else f"{r['cost']:.4f}")
+        tin, tout, cost = _cells(r)
         print(f"{r['model_id'][:40]:40} {verdict:10} {tin!s:>7} "
               f"{tout!s:>7} {cost:>9} {r['seconds']:>6}")
     print(f"\nwrote {args.out}")

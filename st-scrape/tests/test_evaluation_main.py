@@ -108,6 +108,31 @@ def test_digest_failure_skips_the_meet_and_writes_nothing(tmp_path):
     assert not (tmp_path / CATEGORY).exists()
 
 
+def test_empty_digest_skips_without_calling_evaluate_or_touching_the_cache(
+        tmp_path, monkeypatch):
+    """"NOPE" doesn't make dg.build raise -- it degrades to an all-zero
+    digest (facts["entrants"] == 0). Before the fix-round-2 guard, run() still
+    reached ag.evaluate() with that empty digest (and only survived because
+    the autouse fake agent isn't callable); that's a wasted model call in
+    production. The digest-level guard in run() must skip before evaluate is
+    ever invoked and before the cache is touched -- that's the assertion that
+    proves we don't spend."""
+    con = digest_con()
+    _bucket()
+
+    evaluate_calls = []
+    put_calls = []
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: evaluate_calls.append(1))
+    monkeypatch.setattr(cli.cache, "put", lambda *a, **k: put_calls.append(1))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, "NOPE")], **KWARGS)
+
+    assert not evaluate_calls
+    assert not put_calls
+    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert not (tmp_path / CATEGORY).exists()
+
+
 def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
         tmp_path, monkeypatch):
     con = digest_con()
