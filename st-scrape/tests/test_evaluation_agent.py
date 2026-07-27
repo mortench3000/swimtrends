@@ -101,6 +101,39 @@ def test_build_agent_wires_region_model_and_a_numbered_guardrail(monkeypatch):
     assert seen["cache_prompt"] == "default"
 
 
+def test_build_agent_defaults_to_cache_prompt_default(monkeypatch):
+    """Production behaviour is unchanged when cache_prompt isn't specified."""
+    seen = {}
+
+    class RecordingModel:
+        stateful = False
+
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(ag, "BedrockModel", RecordingModel)
+    ag.build_agent(model_id="model-x", guardrail_id="gr-1", guardrail_version="3")
+    assert seen["cache_prompt"] == "default"
+
+
+def test_build_agent_omits_cache_prompt_kwarg_when_none(monkeypatch):
+    """A model without prompt-caching support (e.g. Ministral) must not even
+    receive the kwarg — Bedrock rejects the whole call outright, not just the
+    optimisation, when the model doesn't support caching."""
+    seen = {}
+
+    class RecordingModel:
+        stateful = False
+
+        def __init__(self, **kwargs):
+            seen.update(kwargs)
+
+    monkeypatch.setattr(ag, "BedrockModel", RecordingModel)
+    ag.build_agent(model_id="model-x", guardrail_id="gr-1", guardrail_version="3",
+                   cache_prompt=None)
+    assert "cache_prompt" not in seen
+
+
 def test_build_agent_refuses_a_draft_guardrail():
     with pytest.raises(ValueError):
         ag.build_agent(model_id="model-x", guardrail_id="gr-1",

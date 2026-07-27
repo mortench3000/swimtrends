@@ -96,20 +96,30 @@ def model_label(model_id: str) -> str:
     return MODEL_LABELS.get(model_id, model_id)
 
 
-def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str) -> Agent:
+def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str,
+                cache_prompt: str | None = "default") -> Agent:
     """A Converse-API agent with the guardrail applied inline at a numbered
     version. DRAFT is refused: a draft guardrail can change under us between
-    two meets in the same batch."""
+    two meets in the same batch.
+
+    cache_prompt defaults to "default" (today's production behaviour) but is
+    an optional keyword: prompt caching is an Anthropic-model optimisation on
+    Bedrock, and a model that doesn't support it rejects the whole Converse
+    call outright (AccessDeniedException) rather than just skipping the
+    optimisation. Pass cache_prompt=None for a model without support — the
+    kwarg is then omitted entirely so the SDK's own default applies."""
     if not guardrail_version or guardrail_version.strip().upper() == "DRAFT":
         raise ValueError("guardrail_version must be a numbered version, not DRAFT")
-    model = BedrockModel(
+    kwargs = dict(
         model_id=model_id,
         region_name=REGION,
         guardrail_id=guardrail_id,
         guardrail_version=guardrail_version,
         max_tokens=MAX_TOKENS,
-        cache_prompt="default",
     )
+    if cache_prompt is not None:
+        kwargs["cache_prompt"] = cache_prompt
+    model = BedrockModel(**kwargs)
     return Agent(model=model, system_prompt=SYSTEM_PROMPT)
 
 
