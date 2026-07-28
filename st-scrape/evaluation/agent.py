@@ -13,7 +13,7 @@ from strands.models import BedrockModel
 
 from evaluation.check import check_numbers
 
-PROMPT_VERSION = "4"
+PROMPT_VERSION = "5"
 SCHEMA_VERSION = "1"
 
 REGION = "eu-west-1"
