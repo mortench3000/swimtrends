@@ -76,7 +76,9 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
         guard = ag.OutputGuard(
             guardrail_id=guardrail_id, guardrail_version=guardrail_version,
             client=boto3.client("bedrock-runtime", region_name=ag.REGION))
-    meet_list = meets or _all_meets(con)
+    # `meets is None` means "no filter" -- an empty list is a filter that
+    # selected nothing, and must not silently widen to the whole registry.
+    meet_list = _all_meets(con) if meets is None else meets
     stats = {"total": len(meet_list), "hit": 0, "generated": 0, "skipped": 0, "written": 0}
 
     for category, meet_id in meet_list:
@@ -174,6 +176,12 @@ def main(argv=None):
         raise SystemExit(
             "--meets was given but empty (omit the flag to process all meets)")
     meets = _parse_meets(args.meets) if args.meets is not None else None
+    # A filter that parsed to nothing (e.g. --meets ",") is a typo, not a
+    # request for every meet: with --force that would revoke every cached text.
+    if meets is not None and not meets:
+        raise SystemExit(
+            f"--meets {args.meets!r} selected no meets "
+            "(omit the flag to process all meets)")
 
     stats = run(connect(), args.out, model_id=args.model,
                 guardrail_id=guardrail_id, guardrail_version=guardrail_version,

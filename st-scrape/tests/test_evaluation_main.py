@@ -384,6 +384,29 @@ def test_parse_meets_rejects_a_malformed_entry():
         cli._parse_meets("DM-L-12486")
 
 
+@pytest.mark.parametrize("spec", [",", " , ", ",,"])
+def test_main_rejects_a_meets_flag_that_parses_to_nothing(tmp_path, spec):
+    """A filter that parses to zero entries used to be indistinguishable from
+    "no filter given": _parse_meets returned [], which is falsy, so run() fell
+    through to every meet in the registry. With --force that turns a typo into
+    revoking every cached text and spending the whole batch."""
+    with pytest.raises(SystemExit, match="no meets"):
+        cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run",
+                  "--meets", spec])
+
+
+def test_run_treats_an_empty_meet_list_as_empty_not_as_all_meets(tmp_path):
+    """The other half of the same defect, at the run() boundary: `meets or
+    _all_meets(con)` conflated [] with None. Only None means "no filter"."""
+    con = digest_con()
+    _bucket()
+
+    stats = cli.run(con, tmp_path, meets=[], **KWARGS)
+
+    assert stats["total"] == 0
+    assert cli.run(con, tmp_path, meets=None, dry_run=True, **KWARGS)["total"] > 0
+
+
 def test_main_rejects_an_explicitly_empty_meets_flag(tmp_path):
     # --dry-run so the guardrail-env guard doesn't fire first; the empty
     # --meets check must still happen before any DuckDB/S3 call.
