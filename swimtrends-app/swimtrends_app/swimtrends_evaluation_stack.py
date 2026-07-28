@@ -27,8 +27,20 @@ from aws_cdk import CfnOutput, Stack
 from aws_cdk import aws_bedrock as bedrock
 from constructs import Construct
 
-GROUNDING_THRESHOLD = 0.85
-RELEVANCE_THRESHOLD = 0.5
+# Measured, not guessed — see test_grounding_is_the_only_contextual_filter.
+# The report is checked ONE SECTION AT A TIME (evaluation/agent.py OutputGuard),
+# because a four-section concatenation scores far below its own sections and no
+# threshold separates good from bad on the whole blob. Per section, real reports
+# scored 0.63-0.95 and deliberately ungrounded ones 0.00-0.34, so 0.5 sits in
+# the middle of a wide measured gap. Raising this without re-measuring per
+# section will block every meet.
+GROUNDING_THRESHOLD = 0.5
+
+# No RELEVANCE filter. It measures "does this text answer the query", and with
+# one generic query per meet every section answers it about equally: the
+# physique-violation probe scored 0.70 while the honest per-stroke section
+# scored 0.36. Any threshold blocks honest prose for a reason unrelated to the
+# policy, so the filter is absent rather than lowered.
 
 BLOCKED_INPUT_MESSAGE = "Input blocked by guardrail."
 BLOCKED_OUTPUT_MESSAGE = "Output blocked by guardrail."
@@ -101,7 +113,6 @@ def policy_fingerprint() -> str:
         "topics": DENIED_TOPICS,
         "content_filters": CONTENT_FILTERS,
         "grounding": GROUNDING_THRESHOLD,
-        "relevance": RELEVANCE_THRESHOLD,
         "blocked_input": BLOCKED_INPUT_MESSAGE,
         "blocked_output": BLOCKED_OUTPUT_MESSAGE,
     }, sort_keys=True, ensure_ascii=False)
@@ -143,8 +154,6 @@ class SwimtrendsEvaluationStack(Stack):
                     filters_config=[
                         bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
                             type="GROUNDING", threshold=GROUNDING_THRESHOLD),
-                        bedrock.CfnGuardrail.ContextualGroundingFilterConfigProperty(
-                            type="RELEVANCE", threshold=RELEVANCE_THRESHOLD),
                     ])),
         )
 

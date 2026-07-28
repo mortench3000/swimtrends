@@ -171,7 +171,7 @@ def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str) -> 
 
 
 class OutputGuard:
-    """The guardrail applied to the generated text, explicitly.
+    """The guardrail applied to the generated text, explicitly, section by section.
 
     The inline guardrailConfig on the Converse call does not do this job here.
     `structured_output_model` is a forced tool call in strands, so the Danish
@@ -183,8 +183,15 @@ class OutputGuard:
     Converse cannot receive those through a plain string prompt.
 
     ApplyGuardrail is text-based and does take those qualifiers, so this is
-    where both halves of the policy actually get enforced. One extra call per
-    *generated* meet, none on a cache hit.
+    where both halves of the policy actually get enforced. One call per
+    *section* of a generated meet, none on a cache hit.
+
+    One call per section rather than one for the whole report, because
+    concatenation destroys the grounding score. Measured against six real
+    reports: 0.40-0.81 for the whole report, 0.63-0.95 for those same reports'
+    individual sections. Deliberately ungrounded sections scored 0.00-0.34, so
+    per section the threshold has a wide margin to sit in and a block can say
+    which section was wrong. See the stack's GROUNDING_THRESHOLD.
     """
 
     def __init__(self, *, guardrail_id: str, guardrail_version: str, client) -> None:
@@ -192,20 +199,31 @@ class OutputGuard:
             guardrail_id, guardrail_version)
         self.client = client
 
-    def check(self, report_text: str, digest_json: str) -> None:
-        """Raise EvaluationError if the guardrail intervenes on the report."""
-        response = self.client.apply_guardrail(
-            guardrailIdentifier=self.guardrail_id,
-            guardrailVersion=self.guardrail_version,
-            source="OUTPUT",
-            content=[
-                {"text": {"text": digest_json, "qualifiers": ["grounding_source"]}},
-                {"text": {"text": GUARD_QUERY, "qualifiers": ["query"]}},
-                {"text": {"text": report_text}},        # unqualified: guard this
-            ])
-        if response.get("action") == "GUARDRAIL_INTERVENED":
-            raise EvaluationError(
-                f"the guardrail blocked the report: {response.get('assessments')}")
+    def check(self, sections: list[dict], digest_json: str) -> None:
+        """Raise EvaluationError if the guardrail intervenes on any section.
+
+        Stops at the first blocked section: the report is already unpublishable,
+        and the remaining calls cost money to confirm it.
+        """
+        for section in sections:
+            response = self.client.apply_guardrail(
+                guardrailIdentifier=self.guardrail_id,
+                guardrailVersion=self.guardrail_version,
+                source="OUTPUT",
+                content=[
+                    {"text": {"text": digest_json,
+                              "qualifiers": ["grounding_source"]}},
+                    # Required even with no RELEVANCE filter reading it:
+                    # ApplyGuardrail rejects the request with a
+                    # ValidationException when a contextual grounding policy is
+                    # configured and the query block is absent.
+                    {"text": {"text": GUARD_QUERY, "qualifiers": ["query"]}},
+                    {"text": {"text": section["body"]}},   # unqualified: guard this
+                ])
+            if response.get("action") == "GUARDRAIL_INTERVENED":
+                raise EvaluationError(
+                    f"the guardrail blocked the section {section['heading']!r}: "
+                    f"{response.get('assessments')}")
 
 
 def _prompt(digest_json: str, offenders: set[str] | None = None) -> str:
@@ -253,8 +271,10 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> li
         text = "\n".join(s.body for s in report.sections)
         offenders = check_numbers(text, digest)
         if not offenders:
+            sections = [{"heading": s.heading, "body": s.body}
+                        for s in report.sections]
             # Last gate before the caller caches and publishes this text.
-            guard.check(text, digest_json)
-            return [{"heading": s.heading, "body": s.body} for s in report.sections]
+            guard.check(sections, digest_json)
+            return sections
     raise EvaluationError(
         f"numbers not in digest after {retries} retry: {sorted(offenders)}")

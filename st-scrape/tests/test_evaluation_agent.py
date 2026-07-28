@@ -53,10 +53,16 @@ class FakeGuardrailClient:
     def __init__(self, action="NONE"):
         self.action = action
         self.calls = []
+        # Optional {section body substring -> action}, for intervening on one
+        # section of a report while the others pass.
+        self.action_for: dict[str, str] = {}
 
     def apply_guardrail(self, **kwargs):
         self.calls.append(kwargs)
-        return {"action": self.action, "assessments": [{"topicPolicy": "x"}]}
+        guarded = kwargs["content"][2]["text"]["text"]
+        action = next((a for key, a in self.action_for.items() if key in guarded),
+                      self.action)
+        return {"action": action, "assessments": [{"topicPolicy": "x"}]}
 
 
 def _guard(action="NONE"):
@@ -133,7 +139,7 @@ def test_evaluate_applies_the_guardrail_to_the_report_before_returning():
     fake = FakeAgent(_sections("612 point."))
     out = ag.evaluate(DIGEST, agent=fake, guard=guard)
 
-    assert len(guard.client.calls) == 1
+    assert len(guard.client.calls) == len(out)
     call = guard.client.calls[0]
     assert call["guardrailIdentifier"] == "gr-1"
     assert call["guardrailVersion"] == "3"
@@ -141,13 +147,56 @@ def test_evaluate_applies_the_guardrail_to_the_report_before_returning():
     blocks = call["content"]
     # Contextual grounding needs the source and the query tagged; Converse
     # cannot receive either through a plain string prompt, which is why the
-    # 0.85/0.5 thresholds had never once been evaluated.
+    # thresholds had never once been evaluated. The query block stays even
+    # though no RELEVANCE filter reads it — ApplyGuardrail rejects the request
+    # with a ValidationException when any grounding policy is configured and
+    # the query is missing.
     assert blocks[0]["text"]["qualifiers"] == ["grounding_source"]
     assert "412" in blocks[0]["text"]["text"]              # the digest
     assert blocks[1]["text"]["qualifiers"] == ["query"]
     # Unqualified = the content to guard, i.e. what we are about to publish.
     assert "qualifiers" not in blocks[2]["text"]
-    assert blocks[2]["text"]["text"] == "\n".join(s["body"] for s in out)
+    assert blocks[2]["text"]["text"] == out[0]["body"]
+
+
+def test_the_guard_checks_each_section_separately():
+    """One call per section, not one for the concatenation.
+
+    Measured against the deployed v3: six real reports all scored 0.40-0.81 as
+    one block, while their own sections scored 0.63-0.95. Concatenating four
+    sections depresses the grounding score below anything a truthful report can
+    reach, so the whole-report check could only ever be all-pass or all-fail.
+    Per section the signal is sharp (ungrounded probes 0.00-0.34), and a block
+    can name which section was wrong.
+    """
+    guard = _guard()
+    bodies = [f"{n} point." for n in (612, 612, 612, 612)]
+    fake = FakeAgent([{"heading": h, "body": b}
+                      for h, b in zip(ag.HEADINGS, bodies)])
+    ag.evaluate(DIGEST, agent=fake, guard=guard)
+
+    guarded = [c["content"][2]["text"]["text"] for c in guard.client.calls]
+    assert guarded == bodies
+    # Every call carries the full digest as its grounding source: a section is
+    # judged against all the facts, not only the ones it happens to quote.
+    for call in guard.client.calls:
+        assert "412" in call["content"][0]["text"]["text"]
+
+
+def test_a_block_names_the_offending_section():
+    """The operator's only signal is the log line, and "the guardrail blocked
+    the report" for a four-section report leaves them re-deriving which part."""
+    client = FakeGuardrailClient()
+    client.action_for = {"tredje": "GUARDRAIL_INTERVENED"}
+    guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3",
+                           client=client)
+    bodies = ["612 point.", "612 point.", "612 point i tredje.", "612 point."]
+    fake = FakeAgent([{"heading": h, "body": b}
+                      for h, b in zip(ag.HEADINGS, bodies)])
+    with pytest.raises(ag.EvaluationError, match=ag.HEADINGS[2]):
+        ag.evaluate(DIGEST, agent=fake, guard=guard)
+    # Stops at the first blocked section rather than paying for the rest.
+    assert len(client.calls) == 3
 
 
 def test_evaluate_raises_when_the_output_guardrail_intervenes():
@@ -163,9 +212,10 @@ def test_evaluate_guards_only_the_report_it_is_about_to_return():
     guard = _guard()
     fake = FakeAgent(_sections("Median var 777 point."),      # rejected
                      _sections("Median var 612 point."))      # returned
-    ag.evaluate(DIGEST, agent=fake, guard=guard)
-    assert len(guard.client.calls) == 1
-    assert "612" in guard.client.calls[0]["content"][2]["text"]["text"]
+    out = ag.evaluate(DIGEST, agent=fake, guard=guard)
+    guarded = [c["content"][2]["text"]["text"] for c in guard.client.calls]
+    assert guarded == [s["body"] for s in out]      # the retry's text, once each
+    assert not any("777" in g for g in guarded)
 
 
 def test_evaluate_never_guards_a_report_that_fails_the_number_check():
@@ -207,7 +257,7 @@ def test_output_guard_request_is_valid_against_the_real_bedrock_api():
                  {"text": {"text": ag.GUARD_QUERY, "qualifiers": ["query"]}},
                  {"text": {"text": "rapporten"}},
              ]})
-        guard.check("rapporten", "{}")
+        guard.check([{"heading": ag.HEADINGS[0], "body": "rapporten"}], "{}")
         stub.assert_no_pending_responses()
 
 

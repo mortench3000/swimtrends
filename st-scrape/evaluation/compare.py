@@ -119,14 +119,14 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
                            structured_output_model=ag.MeetEvaluation)
             sections = [{"heading": s.heading, "body": s.body}
                         for s in result.structured_output.sections]
-            text = "\n".join(s["body"] for s in sections)
-            offenders = check_numbers(text, digest)
+            offenders = check_numbers("\n".join(s["body"] for s in sections),
+                                      digest)
             tin, tout, usage_ok = _usage(result)
             # Report the guardrail verdict, don't enforce it: comparing
             # candidates means seeing what they actually produce, and a
             # blocked report is a fact about the candidate worth reading
             # next to its prose. The publishing path enforces (OutputGuard).
-            guard = _guard_verdict(text, canonical_json(digest),
+            guard = _guard_verdict(sections, canonical_json(digest),
                                    guardrail_id, guardrail_version)
     except Exception as e:                      # a candidate that errors is a result
         error = f"{type(e).__name__}: {e}"
@@ -140,15 +140,15 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
     }
 
 
-def _guard_verdict(text, digest_json, guardrail_id, guardrail_version):
-    """What the deployed guardrail says about this report: "ok", or the
-    policies that intervened (e.g. "BLOCKED: contextualGrounding"). Never
-    raises — a guardrail that errors must not lose the row's prose."""
+def _guard_verdict(sections, digest_json, guardrail_id, guardrail_version):
+    """What the deployed guardrail says about this report: "ok", or the first
+    section it intervened on (e.g. "BLOCKED: ... 'Bredde' ..."). Never raises —
+    a guardrail that errors must not lose the row's prose."""
     try:
         client = boto3.client("bedrock-runtime", region_name=ag.REGION)
         guard = ag.OutputGuard(guardrail_id=guardrail_id,
                                guardrail_version=guardrail_version, client=client)
-        guard.check(text, digest_json)
+        guard.check(sections, digest_json)
         return "ok"
     except ag.EvaluationError as e:
         return f"BLOCKED: {e}"[:300]

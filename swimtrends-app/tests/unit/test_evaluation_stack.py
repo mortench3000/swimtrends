@@ -44,15 +44,28 @@ def test_guardrail_blocks_the_four_denied_topics():
     })
 
 
-def test_guardrail_has_grounding_and_relevance_thresholds():
-    _template().has_resource_properties("AWS::Bedrock::Guardrail", {
-        "ContextualGroundingPolicyConfig": {
-            "FiltersConfig": assertions.Match.array_with([
-                {"Type": "GROUNDING", "Threshold": 0.85},
-                {"Type": "RELEVANCE", "Threshold": 0.5},
-            ])
-        }
-    })
+def test_grounding_is_the_only_contextual_filter():
+    """GROUNDING only, and at a threshold a truthful section actually reaches.
+
+    Measured against the deployed v3 (threshold 0.85, whole report as one
+    block): every one of six real reports was blocked on GROUNDING alone, at
+    0.40-0.81. Scoring the same reports one section at a time gave 0.63-0.95,
+    and a red team of deliberately ungrounded sections against the same digest
+    scored 0.00-0.34 (invented number 0.10, causal claim 0.00, inferred
+    geography 0.34) against 0.97 for plain recitation. So the check works per
+    section and 0.5 sits in the middle of a wide measured gap; 0.85 on a
+    four-section concatenation is unreachable regardless of content.
+
+    RELEVANCE is removed rather than lowered because it carries no signal here:
+    the physique-violation probe scored 0.70 relevance — higher than the
+    *honest* "Discipliner i bevægelse" section at 0.36-0.43. With one generic
+    query for every meet it measures "does this answer the question", which
+    every section does about equally, so any threshold blocks honest prose for
+    a reason unrelated to the policy.
+    """
+    filters = _guardrail_properties(
+        _template())["ContextualGroundingPolicyConfig"]["FiltersConfig"]
+    assert filters == [{"Type": "GROUNDING", "Threshold": 0.5}]
 
 
 def test_guardrail_configures_content_filters():
