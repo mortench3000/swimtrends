@@ -35,8 +35,11 @@ def _bucket():
 
 def _key(con, category, meet_id):
     digest = dg.build(con, category, meet_id)
-    return digest, cache.cache_key(digest, prompt_version=ag.PROMPT_VERSION,
-                                   schema_version=ag.SCHEMA_VERSION, model_id=MODEL_ID)
+    return digest, cache.cache_key(
+        digest, prompt_version=ag.PROMPT_VERSION,
+        schema_version=ag.SCHEMA_VERSION, model_id=MODEL_ID,
+        guardrail_id=KWARGS["guardrail_id"],
+        guardrail_version=KWARGS["guardrail_version"], max_tokens=ag.MAX_TOKENS)
 
 
 def _cached_payload(category, meet_id, body="cached tekst"):

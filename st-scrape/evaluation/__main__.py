@@ -88,7 +88,10 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 continue
 
             key = cache.cache_key(digest, prompt_version=ag.PROMPT_VERSION,
-                                  schema_version=ag.SCHEMA_VERSION, model_id=model_id)
+                                  schema_version=ag.SCHEMA_VERSION, model_id=model_id,
+                                  guardrail_id=guardrail_id,
+                                  guardrail_version=guardrail_version,
+                                  max_tokens=ag.MAX_TOKENS)
             payload = None if force else cache.get(s3, category, meet_id, key)
             if payload is not None:
                 stats["hit"] += 1

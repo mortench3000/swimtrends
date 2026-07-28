@@ -1,9 +1,15 @@
 """Content-addressed store for generated meet evaluations.
 
-The key is a hash of the digest AND the prompt version, schema version and
-model id. So: unchanged inputs reuse the stored text verbatim (no model call,
-no cost, no drift between refreshes); a deliberate prompt or model change
+The key is a hash of the digest AND everything that shapes the text: prompt
+version, schema version, model id, token budget, and the guardrail's identity.
+So: unchanged inputs reuse the stored text verbatim (no model call, no cost, no
+drift between refreshes); a deliberate prompt, model or safety-policy change
 regenerates every meet, visibly and on purpose.
+
+The guardrail is in the key because it is half the safety envelope. Without it,
+text generated under a laxer guardrail keeps being republished unexamined after
+the policy is tightened — backwards for a safety control, since a tightening is
+exactly when regeneration matters most.
 
 Revoke by deleting the object, or via `python -m evaluation --force`. The
 bucket is versioned, so a regeneration keeps the prior text.
@@ -23,12 +29,16 @@ def canonical_json(obj) -> str:
 
 
 def cache_key(digest: dict, *, prompt_version: str, schema_version: str,
-              model_id: str) -> str:
+              model_id: str, guardrail_id: str, guardrail_version: str,
+              max_tokens: int) -> str:
     material = canonical_json({
         "digest": digest,
         "prompt_version": prompt_version,
         "schema_version": schema_version,
         "model_id": model_id,
+        "guardrail_id": guardrail_id,
+        "guardrail_version": guardrail_version,
+        "max_tokens": max_tokens,
     })
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
