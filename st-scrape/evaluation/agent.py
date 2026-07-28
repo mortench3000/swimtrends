@@ -120,30 +120,39 @@ def model_label(model_id: str) -> str:
     return MODEL_LABELS.get(model_id, model_id)
 
 
-def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str,
-                cache_prompt: str | None = "default") -> Agent:
-    """A Converse-API agent with the guardrail applied inline at a numbered
-    version. DRAFT is refused: a draft guardrail can change under us between
-    two meets in the same batch.
+def numbered_guardrail(guardrail_id: str, guardrail_version: str) -> tuple[str, str]:
+    """Validate the (id, version) pair both enforcement paths depend on.
 
-    cache_prompt defaults to "default" (today's production behaviour) but is
-    an optional keyword: prompt caching is an Anthropic-model optimisation on
-    Bedrock, and a model that doesn't support it rejects the whole Converse
-    call outright (AccessDeniedException) rather than just skipping the
-    optimisation. Pass cache_prompt=None for a model without support — the
-    kwarg is then omitted entirely so the SDK's own default applies."""
-    if not guardrail_version or guardrail_version.strip().upper() == "DRAFT":
+    DRAFT is refused because a draft guardrail can change under us between two
+    meets of the same batch. The id is validated because the failure modes are
+    asymmetric in the wrong direction: BedrockModel gates the whole
+    guardrailConfig on both values being truthy, so a bad *version* fails
+    loudly at Bedrock while a blank *id* silently produces a completely
+    unguarded call."""
+    gid = (guardrail_id or "").strip()
+    version = (guardrail_version or "").strip()
+    if not gid:
+        raise ValueError("guardrail_id must be a non-empty guardrail id")
+    if not version or version.upper() == "DRAFT":
         raise ValueError("guardrail_version must be a numbered version, not DRAFT")
-    kwargs = dict(
+    return gid, version
+
+
+def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str) -> Agent:
+    """A Converse-API agent with the guardrail applied inline at a numbered
+    version.
+
+    The inline guardrail only assesses the *input* on this path — the prose
+    comes back inside a forced tool call, so OutputGuard below is what actually
+    enforces the policy on the generated text."""
+    guardrail_id, guardrail_version = numbered_guardrail(guardrail_id, guardrail_version)
+    model = BedrockModel(
         model_id=model_id,
         region_name=REGION,
         guardrail_id=guardrail_id,
         guardrail_version=guardrail_version,
         max_tokens=MAX_TOKENS,
     )
-    if cache_prompt is not None:
-        kwargs["cache_prompt"] = cache_prompt
-    model = BedrockModel(**kwargs)
     return Agent(model=model, system_prompt=SYSTEM_PROMPT)
 
 

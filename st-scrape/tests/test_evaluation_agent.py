@@ -98,11 +98,13 @@ def test_build_agent_wires_region_model_and_a_numbered_guardrail(monkeypatch):
     assert seen["guardrail_id"] == "gr-1"
     assert seen["guardrail_version"] == "3"
     assert seen["max_tokens"] == 1200
-    assert seen["cache_prompt"] == "default"
 
 
-def test_build_agent_defaults_to_cache_prompt_default(monkeypatch):
-    """Production behaviour is unchanged when cache_prompt isn't specified."""
+def test_build_agent_does_not_pass_the_deprecated_cache_prompt(monkeypatch):
+    """strands 1.50.1 warns cache_prompt is deprecated, and SYSTEM_PROMPT is
+    well under Anthropic-on-Bedrock's minimum cacheable prompt length, so the
+    cache point could never have produced a hit. It also once mis-diagnosed a
+    non-Anthropic candidate as "no model access"."""
     seen = {}
 
     class RecordingModel:
@@ -113,24 +115,6 @@ def test_build_agent_defaults_to_cache_prompt_default(monkeypatch):
 
     monkeypatch.setattr(ag, "BedrockModel", RecordingModel)
     ag.build_agent(model_id="model-x", guardrail_id="gr-1", guardrail_version="3")
-    assert seen["cache_prompt"] == "default"
-
-
-def test_build_agent_omits_cache_prompt_kwarg_when_none(monkeypatch):
-    """A model without prompt-caching support (e.g. Ministral) must not even
-    receive the kwarg — Bedrock rejects the whole call outright, not just the
-    optimisation, when the model doesn't support caching."""
-    seen = {}
-
-    class RecordingModel:
-        stateful = False
-
-        def __init__(self, **kwargs):
-            seen.update(kwargs)
-
-    monkeypatch.setattr(ag, "BedrockModel", RecordingModel)
-    ag.build_agent(model_id="model-x", guardrail_id="gr-1", guardrail_version="3",
-                   cache_prompt=None)
     assert "cache_prompt" not in seen
 
 
@@ -144,6 +128,22 @@ def test_build_agent_refuses_a_padded_draft_guardrail():
     with pytest.raises(ValueError):
         ag.build_agent(model_id="model-x", guardrail_id="gr-1",
                        guardrail_version="  DRAFT  ")
+
+
+def test_build_agent_refuses_a_whitespace_only_guardrail_version():
+    with pytest.raises(ValueError, match="guardrail_version"):
+        ag.build_agent(model_id="model-x", guardrail_id="gr-1",
+                       guardrail_version="   ")
+
+
+@pytest.mark.parametrize("bad", ["", "   ", None])
+def test_build_agent_refuses_a_blank_guardrail_id(bad):
+    """The asymmetry this closes is backwards: BedrockModel gates the whole
+    guardrailConfig on BOTH id and version being truthy, so a bad version
+    fails loudly at Bedrock while a blank id produces a completely unguarded
+    Converse call with no error at all."""
+    with pytest.raises(ValueError, match="guardrail_id"):
+        ag.build_agent(model_id="model-x", guardrail_id=bad, guardrail_version="3")
 
 
 def test_model_label_falls_back_to_the_id():

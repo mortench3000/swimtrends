@@ -60,17 +60,6 @@ PRICES: dict[str, tuple[float, float]] = {
 }
 
 
-def _supports_prompt_caching(model_id: str) -> bool:
-    """Prompt caching (BedrockModel's cache_prompt) is an Anthropic-model
-    feature on Bedrock; a model that doesn't support it fails its whole
-    Converse call outright rather than just skipping the optimisation (this
-    is what mis-diagnosed both Ministral candidates as "no model access" in
-    an earlier run). The `anthropic.` / `eu.anthropic.` id prefix is the
-    honest discriminator — update here, not with a per-model list, when
-    another provider gains support."""
-    return model_id.startswith("anthropic.") or model_id.startswith("eu.anthropic.")
-
-
 def _cost(model_id, tokens_in, tokens_out):
     if model_id not in PRICES:
         return None
@@ -108,15 +97,13 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
     t0 = time.monotonic()
     error, sections, offenders = None, [], set()
     tin, tout, usage_ok = 0, 0, False
-    cached = _supports_prompt_caching(model_id)
     try:
         digest = dg.build(con, category, meet_id)
         if not digest["facts"]["entrants"]:
             error = f"empty digest: no scored swims for {category}/{meet_id}"
         else:
             agent = ag.build_agent(model_id=model_id, guardrail_id=guardrail_id,
-                                   guardrail_version=guardrail_version,
-                                   cache_prompt="default" if cached else None)
+                                   guardrail_version=guardrail_version)
             result = agent(f"<digest>{canonical_json(digest)}</digest>",
                            structured_output_model=ag.MeetEvaluation)
             sections = [{"heading": s.heading, "body": s.body}
@@ -128,7 +115,7 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
     return {
         "category": category, "meet_id": meet_id, "model_id": model_id,
         "seconds": round(time.monotonic() - t0, 1),
-        "tokens_in": tin, "tokens_out": tout, "usage_ok": usage_ok, "cached": cached,
+        "tokens_in": tin, "tokens_out": tout, "usage_ok": usage_ok,
         "cost": _cost(model_id, tin, tout) if usage_ok else None,
         "offenders": sorted(offenders), "sections": sections, "error": error,
     }
@@ -160,15 +147,14 @@ def _html(rows) -> str:
            ".bad{color:#b00}.cols{display:flex;gap:1.5rem;align-items:flex-start}",
            ".col{flex:1;min-width:0}</style>",
            f"<p>prompt_version={html.escape(ag.PROMPT_VERSION)}</p>",
-           "<table><tr><th>meet<th>model<th>cache<th>numbers<th>in<th>out<th>$<th>s</tr>"]
+           "<table><tr><th>meet<th>model<th>numbers<th>in<th>out<th>$<th>s</tr>"]
     for r in rows:
         bad = "bad" if (r["offenders"] or r["error"] or not r["usage_ok"]) else ""
         verdict = r["error"] or (", ".join(r["offenders"]) if r["offenders"] else "ok")
         tin, tout, cost = _cells(r)
-        cache_flag = "on" if r["cached"] else "off"
         out.append(
             f"<tr class='{bad}'><td>{html.escape(r['category'])}/{html.escape(r['meet_id'])}"
-            f"<td>{html.escape(r['model_id'])}<td>{cache_flag}<td>{html.escape(verdict)}"
+            f"<td>{html.escape(r['model_id'])}<td>{html.escape(verdict)}"
             f"<td>{tin}<td>{tout}<td>{cost}<td>{r['seconds']}</tr>")
     out.append("</table>")
 
@@ -217,12 +203,11 @@ def main(argv=None):
                                 guardrail_id, guardrail_version))
         args.out.write_text(_html(rows), encoding="utf-8")
 
-    print(f"\n{'model':40} {'cache':6} {'numbers':10} {'in':>7} {'out':>7} {'$/meet':>9} {'s':>6}")
+    print(f"\n{'model':40} {'numbers':10} {'in':>7} {'out':>7} {'$/meet':>9} {'s':>6}")
     for r in rows:
         verdict = "ERROR" if r["error"] else ("FAIL" if r["offenders"] else "ok")
         tin, tout, cost = _cells(r)
-        cache_flag = "on" if r["cached"] else "off"
-        print(f"{r['model_id'][:40]:40} {cache_flag:6} {verdict:10} {tin!s:>7} "
+        print(f"{r['model_id'][:40]:40} {verdict:10} {tin!s:>7} "
               f"{tout!s:>7} {cost:>9} {r['seconds']:>6}")
     print(f"\nwrote {args.out}")
     return 0
