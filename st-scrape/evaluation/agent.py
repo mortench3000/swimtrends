@@ -132,7 +132,7 @@ def model_label(model_id: str) -> str:
     return MODEL_LABELS.get(model_id, model_id)
 
 
-def numbered_guardrail(guardrail_id: str, guardrail_version: str) -> tuple[str, str]:
+def _numbered_guardrail(guardrail_id: str, guardrail_version: str) -> tuple[str, str]:
     """Validate the (id, version) pair both enforcement paths depend on.
 
     DRAFT is refused because a draft guardrail can change under us between two
@@ -157,7 +157,7 @@ def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str) -> 
     The inline guardrail only assesses the *input* on this path — the prose
     comes back inside a forced tool call, so OutputGuard below is what actually
     enforces the policy on the generated text."""
-    guardrail_id, guardrail_version = numbered_guardrail(guardrail_id, guardrail_version)
+    guardrail_id, guardrail_version = _numbered_guardrail(guardrail_id, guardrail_version)
     model = BedrockModel(
         model_id=model_id,
         region_name=REGION,
@@ -186,7 +186,7 @@ class OutputGuard:
     """
 
     def __init__(self, *, guardrail_id: str, guardrail_version: str, client) -> None:
-        self.guardrail_id, self.guardrail_version = numbered_guardrail(
+        self.guardrail_id, self.guardrail_version = _numbered_guardrail(
             guardrail_id, guardrail_version)
         self.client = client
 
