@@ -291,6 +291,15 @@ left there is deleted, so a skip can never republish superseded text. The
 later run succeeds — the page falls back to rendering without it, same as any
 other skip.
 
+A full generation of every meet can exhaust the account's **daily** Bedrock
+token quota. Observed on the first full-set run: `ThrottlingException: Too many
+tokens per day`, after which every remaining meet fails and the run appears to
+hang (the retries back off for minutes at a time). Nothing is lost — the meets
+already generated are cached, so re-running the next day resumes and pays only
+for what is left. The cost driver to watch is a model that loops on a rejected
+tool call; the section heading is a schema enum specifically because one
+misspelling once cost 105 tool calls on a single meet.
+
 If **more meets are skipped than written** — wrong `EVAL_MODEL_ID`, a revoked
 guardrail, expired credentials, throttling partway through — `web-eval` exits
 non-zero on purpose and `make` stops before the sync. A minority of skips in an
