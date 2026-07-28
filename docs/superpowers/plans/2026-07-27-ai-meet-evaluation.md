@@ -30,7 +30,7 @@ The spec has been brought fully in line; see it for the reasoning.
 | Footer copy verbatim, "Alle tal kan efterprøves i tabellerne ovenfor" | "Alle tal stammer fra stævnets egne data og er maskinelt kontrolleret." The digest carries a sixth season and per-stroke medians the page does not render, so the original claim was false as shipped. The `· AI-genereret, eksperimentelt` summary suffix is unchanged. |
 | `written == 0` exit floor | Proportional: exits non-zero when `skipped > written`, and every skip path deletes that meet's stale `evaluation.json`. |
 | `strands-agents`/`pydantic` in `requirements.txt` | Moved to `requirements-eval.txt`, pulled in by `requirements-dev.txt` — both Fargate images install `requirements.txt` and import neither. |
-| Per-task test counts (Task 1's "164 before this task", etc.) | The `164` baseline was correct at `23e9044`. Final counts after the fix waves: **st-scrape 267, swimtrends-app 43, web 36.** |
+| Per-task test counts (Task 1's "164 before this task", etc.) | The `164` baseline was correct at `23e9044`. Final counts after the fix waves: **st-scrape 269, swimtrends-app 44, web 36.** |
 
 ## Global Constraints
 

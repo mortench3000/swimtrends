@@ -272,8 +272,17 @@ regenerates every meet on the next run.
 Every number in a published evaluation is checked against the digest
 (`evaluation/check.py`); a report that fails twice is dropped and the page
 renders without the section. A report that passes the number check is then put
-through `ApplyGuardrail`, and a block is likewise a drop — nothing is cached or
-written.
+through `ApplyGuardrail` **section by section**, and a block is retried exactly
+like a fabricated number: the rewrite prompt names the blocked section and the
+offence, and only a report that is blocked twice is dropped — nothing is cached
+or written then.
+
+The retry exists because the model, not the policy, is what fails here. On the
+first real run against a working guardrail, 2 of 3 meets were blocked, each on a
+single section carrying a causal claim ("dette skyldes …", "er således en
+væsentlig forklarende faktor") that `SYSTEM_PROMPT` rule 6 already forbids. One
+drifting section is not worth the whole meet's page section, and the same rule-6
+wording now quotes those constructions back at the model.
 
 A meet that fails during `web-eval` (digest error, a bad AI report, a guardrail
 block, a transient S3 error) gets no `evaluation.json`: any file an earlier run

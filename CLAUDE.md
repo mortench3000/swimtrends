@@ -43,7 +43,7 @@ Scraping and AWS commands need network + credentials.
 ## Common commands (run from the dir shown)
 ```bash
 # Tests — always run before claiming done
-cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion + evaluation (260)
+cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion + evaluation (269)
 cd swimtrends-app  && .venv/bin/python -m pytest tests/unit # CDK assertions (40)
 cd web             && npm test                              # SPA unit tests (36)
 
@@ -145,8 +145,10 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   against a digest of times and points). `TalentProjection`'s definition says
   "named individual swimmer … statistics about a meet are not in scope" for a
   measured reason — the looser wording read as *statistical* projection and
-  blocked a real report on aggregate prose. See
-  [`docs/analytics.md`](docs/analytics.md).
+  blocked a real report on aggregate prose. A block is **retried** like a
+  fabricated number (the rewrite prompt names the section and the offence),
+  because what fails in practice is the model, not the policy: causal prose rule
+  6 already forbids. See [`docs/analytics.md`](docs/analytics.md).
 
 ## Development conventions
 - **TDD.** Write the failing test first, watch it fail, then implement. App tests
