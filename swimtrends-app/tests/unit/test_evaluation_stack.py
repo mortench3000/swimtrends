@@ -1,6 +1,10 @@
+import copy
+
 import aws_cdk as cdk
+import pytest
 from aws_cdk import assertions
 
+from swimtrends_app import swimtrends_evaluation_stack as mod
 from swimtrends_app.swimtrends_evaluation_stack import SwimtrendsEvaluationStack
 
 
@@ -8,6 +12,12 @@ def _template():
     app = cdk.App()
     stack = SwimtrendsEvaluationStack(app, "TestEval")
     return assertions.Template.from_stack(stack)
+
+
+def _version_description(t):
+    versions = t.find_resources("AWS::Bedrock::GuardrailVersion")
+    assert versions, "no guardrail version in the template"
+    return next(iter(versions.values()))["Properties"]["Description"]
 
 
 def test_guardrail_blocks_the_four_denied_topics():
@@ -39,21 +49,82 @@ def test_guardrail_has_grounding_and_relevance_thresholds():
     })
 
 
+def test_guardrail_configures_content_filters():
+    """There is no such thing as content filters "at service defaults": omitting
+    the block means a guardrail with no content filters at all, which is what
+    the deployed v2 had."""
+    t = _template()
+    guardrails = t.find_resources("AWS::Bedrock::Guardrail")
+    props = next(iter(guardrails.values()))["Properties"]
+    filters = props["ContentPolicyConfig"]["FiltersConfig"]
+    assert {f["Type"] for f in filters} == {
+        "HATE", "INSULTS", "SEXUAL", "VIOLENCE", "MISCONDUCT", "PROMPT_ATTACK"}
+
+
+def test_prompt_attack_detection_is_input_only():
+    """Bedrock only supports PROMPT_ATTACK on the input; an output strength
+    other than NONE is rejected at deploy time, not at synth."""
+    t = _template()
+    guardrails = t.find_resources("AWS::Bedrock::Guardrail")
+    filters = next(iter(guardrails.values()))["Properties"][
+        "ContentPolicyConfig"]["FiltersConfig"]
+    attack = next(f for f in filters if f["Type"] == "PROMPT_ATTACK")
+    assert attack["OutputStrength"] == "NONE"
+    assert attack["InputStrength"] != "NONE"
+
+
 def test_a_numbered_version_is_published():
     t = _template()
     t.resource_count_is("AWS::Bedrock::GuardrailVersion", 1)
 
 
-def test_version_description_embeds_the_grounding_threshold():
-    """A published guardrail VERSION is immutable — CloudFormation only
-    replaces it (publishing a new version) when its OWN properties change.
-    The threshold value must live in the version's description, or a future
-    threshold change would silently keep the batch job on the old value."""
-    t = _template()
-    versions = t.find_resources("AWS::Bedrock::GuardrailVersion")
-    assert versions, "no guardrail version in the template"
-    for res in versions.values():
-        assert "0.85" in res["Properties"]["Description"]
+def _tighten_a_topic_definition(monkeypatch):
+    topics = copy.deepcopy(mod.DENIED_TOPICS)
+    topics[0]["definition"] += " Including hypothetical future performance."
+    monkeypatch.setattr(mod, "DENIED_TOPICS", topics)
+
+
+def _add_a_denied_topic(monkeypatch):
+    topics = copy.deepcopy(mod.DENIED_TOPICS) + [
+        {"name": "SomethingElse", "definition": "A newly denied topic.",
+         "examples": ["Et eksempel."]}]
+    monkeypatch.setattr(mod, "DENIED_TOPICS", topics)
+
+
+def _weaken_a_content_filter(monkeypatch):
+    filters = copy.deepcopy(mod.CONTENT_FILTERS)
+    filters[0]["output_strength"] = "LOW"
+    monkeypatch.setattr(mod, "CONTENT_FILTERS", filters)
+
+
+def _lower_the_grounding_threshold(monkeypatch):
+    monkeypatch.setattr(mod, "GROUNDING_THRESHOLD", 0.7)
+
+
+def _change_the_block_message(monkeypatch):
+    monkeypatch.setattr(mod, "BLOCKED_OUTPUT_MESSAGE", "Nope.")
+
+
+@pytest.mark.parametrize("mutate", [
+    _tighten_a_topic_definition,
+    _add_a_denied_topic,
+    _weaken_a_content_filter,
+    _lower_the_grounding_threshold,
+    _change_the_block_message,
+], ids=lambda f: f.__name__.strip("_"))
+def test_version_description_tracks_every_part_of_the_policy(monkeypatch, mutate):
+    """A published guardrail VERSION is immutable, and CfnGuardrailVersion has
+    exactly two properties — the guardrail id (stable) and the description — so
+    the description is the only lever that republishes it. Embedding just the
+    two thresholds left it blind to the more dangerous field: a topic
+    definition, the set of topics, or the content policy could change, update
+    the DRAFT, and leave the published version serving the old policy while
+    every test passed and cdk deploy reported success. Thresholds are a dial;
+    topics are the policy. So the description carries a fingerprint of the
+    whole config, and every part of it has to move the fingerprint."""
+    before = _version_description(_template())
+    mutate(monkeypatch)
+    assert _version_description(_template()) != before
 
 
 def test_outputs_expose_the_id_and_version():
