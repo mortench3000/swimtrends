@@ -224,6 +224,23 @@ def test_schema_rejects_a_wrong_heading_set():
         ag.MeetEvaluation(sections=[{"heading": "Noget andet", "body": "x"}])
 
 
+def test_schema_rejects_the_right_headings_in_the_wrong_order():
+    """Section identity and order are a guarantee the frontend leans on: it
+    keys its {#each} on s.heading, so a reordered or short section list changes
+    what the page renders where. Only the per-Section heading validator was
+    tested, which leaves MeetEvaluation.all_four_in_order free to be a no-op."""
+    reordered = list(reversed(ag.HEADINGS))
+    with pytest.raises(Exception, match="in order"):
+        ag.MeetEvaluation(
+            sections=[{"heading": h, "body": "x"} for h in reordered])
+
+
+def test_schema_rejects_a_missing_section():
+    with pytest.raises(Exception, match="in order"):
+        ag.MeetEvaluation(
+            sections=[{"heading": h, "body": "x"} for h in ag.HEADINGS[:-1]])
+
+
 def test_build_agent_wires_region_model_and_a_numbered_guardrail(monkeypatch):
     seen = {}
 

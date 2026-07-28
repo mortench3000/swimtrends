@@ -39,6 +39,13 @@ def test_season_history_is_newest_first_and_capped_at_six_rows():
     d = digest.build(digest_con(), "DM-L", "D2026")
     seasons = [r["season"] for r in d["season_history"]]
     assert seasons == [2026, 2025, 2024, 2023, 2022, 2021]
+    # The own-season row is the same field as facts, scoped the same way (the
+    # fixture's para swim must be out of both, or the report's "vs last season"
+    # sentence compares an open field against an open+para one).
+    own = d["season_history"][0]
+    f = d["facts"]
+    assert (own["entrants"], own["clubs"], own["median_points"]) == (
+        f["entrants"], f["clubs"], f["median_points"])
 
 
 def test_season_history_truncates_to_the_window_for_an_older_meet():

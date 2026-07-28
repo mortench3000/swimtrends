@@ -43,6 +43,25 @@ def test_derived_percentage_from_the_digest_is_allowed():
     assert check.check_numbers("Niveauet lå 2% over 5-sæsons-snittet.", DIGEST) == set()
 
 
+def test_a_negative_delta_is_licensed_signed_and_unsigned():
+    """Real deltas are negative -- DM-L's production digest carried -36, -29,
+    -21 -- and Danish prose writes them unsigned ("faldt 36 point"), because
+    the direction is in the verb. So the digest's -36 has to license both "36"
+    and "-36". No fixture here contained a single negative number, which left
+    the sign-stripping add in _walk (and the same property for a negative
+    derived percentage) entirely untested."""
+    d = {**DIGEST,
+         "by_stroke": [{"stroke": "Bryst", "dist_group": "sprint",
+                        "median_points": 574, "prev5_median": 610, "delta": -36}],
+         "derived": {"median_points_vs_prev5_pct": -7}}
+    assert check.check_numbers("Brystsvømning faldt 36 point.", d) == set()
+    assert check.check_numbers("Brystsvømning: delta -36 point.", d) == set()
+    assert check.check_numbers("Niveauet lå 7% under snittet.", d) == set()
+    assert check.check_numbers("Niveauet lå -7% fra snittet.", d) == set()
+    # still a real check: a delta the digest does not contain is caught
+    assert check.check_numbers("Brystsvømning faldt 44 point.", d) == {"44"}
+
+
 def test_undeclared_percentage_is_caught():
     assert check.check_numbers("Niveauet lå 9% over snittet.", DIGEST) == {"9"}
 

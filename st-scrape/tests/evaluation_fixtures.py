@@ -40,7 +40,14 @@ _EVENTS = [
 def _dm_l_con(seasons) -> duckdb.DuckDBPyConnection:
     """DM-L, the given seasons. Six swimmers per event; points climb with
     season (base 400 + 20 per season past 2021) so medians differ per season,
-    and swimmer index shifts points so top_swims has a stable order."""
+    and swimmer index shifts points so top_swims has a stable order.
+
+    Each season also carries one class='para' swim, from a club that swims
+    nowhere else, with points above every open swim of any season. The digest
+    filters class = 'open' in five places (facts, history, elite, top_swims,
+    by_stroke); dropping any one of them moves top_points, the medians, the club
+    count or the top-swims ordering, so this single row pins all of them.
+    """
     obt, meets = [], []
     for season in seasons:
         mid = f"D{season}"
@@ -63,6 +70,15 @@ def _dm_l_con(seasons) -> duckdb.DuckDBPyConnection:
                     points=pts, points_fixed=pts, season=season, meet_name=name,
                     meet_date=mdate, distance=distance, stroke=stroke,
                     gender=gender, type="Final"))
+        # One para swim per season: a stroke and a club that appear nowhere
+        # else, and more points than any open swim in any season.
+        obt.append(_row(
+            result_id=f"{mid}-para", race_id=900, meet_id=mid, rank=1,
+            name="Para Swimmer", swimmer_id="p1", club="PARAKLUB",
+            completed_time=_time(4800), completed_centiseconds=4800,
+            points=999, points_fixed=999, season=season, meet_name=name,
+            meet_date=mdate, distance=100, stroke="Fly", gender="M",
+            type="Timed final", **{"class": "para"}))
     con = duckdb.connect()
     build_curated(con, obt=obt, meets=meets, splits=[])
     create_views(con)
