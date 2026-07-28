@@ -14,6 +14,8 @@ publish.
 PROMPT_VERSION / SCHEMA_VERSION are part of the cache key: bump either and
 every meet regenerates on the next run. Do that deliberately.
 """
+import logging
+
 from pydantic import BaseModel, field_validator
 from strands import Agent
 from strands.models import BedrockModel
@@ -21,7 +23,9 @@ from strands.models import BedrockModel
 from evaluation.cache import canonical_json
 from evaluation.check import check_numbers
 
-PROMPT_VERSION = "5"
+log = logging.getLogger("evaluation")
+
+PROMPT_VERSION = "6"
 SCHEMA_VERSION = "1"
 
 REGION = "eu-west-1"
@@ -85,6 +89,13 @@ Rules — these are absolute:
    club or participant count — a count is a count, nothing more. Never
    editorialise: state what the numbers show, don't opine on what they imply,
    and never pose a rhetorical question.
+   Report, never explain. The digest records what happened, never why, so no
+   sentence may give a reason for a figure or connect two figures as cause and
+   effect. Constructions like "dette skyldes …", "en væsentlig forklarende
+   faktor", "når flere deltager, påvirkes medianen …", "denne sammensætning
+   indikerer …" or "det afspejler …" are forbidden however plausible they are:
+   more entrants and a lower median are two facts, not one explanation. If two
+   figures moved, report both movements and stop.
 7. CONSISTENCY. Never describe the same figure as both unchanged and changed
    (e.g. "uændret" and "en stigning på ..."). A non-zero delta is a change,
    however small — call it unchanged only when it is exactly 0. If your
@@ -199,11 +210,13 @@ class OutputGuard:
             guardrail_id, guardrail_version)
         self.client = client
 
-    def check(self, sections: list[dict], digest_json: str) -> None:
-        """Raise EvaluationError if the guardrail intervenes on any section.
+    def check(self, sections: list[dict], digest_json: str) -> str | None:
+        """The heading of the first section the guardrail intervened on, or None.
 
         Stops at the first blocked section: the report is already unpublishable,
-        and the remaining calls cost money to confirm it.
+        and the remaining calls cost money to confirm it. Returns rather than
+        raises so `evaluate` can retry a block the same way it retries a
+        fabricated number — both are one section drifting off the digest.
         """
         for section in sections:
             response = self.client.apply_guardrail(
@@ -221,18 +234,33 @@ class OutputGuard:
                     {"text": {"text": section["body"]}},   # unqualified: guard this
                 ])
             if response.get("action") == "GUARDRAIL_INTERVENED":
-                raise EvaluationError(
-                    f"the guardrail blocked the section {section['heading']!r}: "
-                    f"{response.get('assessments')}")
+                log.info("the guardrail blocked the section %r: %s",
+                         section["heading"], response.get("assessments"))
+                return section["heading"]
+        return None
 
 
-def _prompt(digest_json: str, offenders: set[str] | None = None) -> str:
-    if not offenders:
-        return f"<digest>{digest_json}</digest>"
-    bad = ", ".join(sorted(offenders))
-    return (f"<digest>{digest_json}</digest>\n"
-            f"Your previous answer contained numbers that are not in the digest: "
-            f"{bad}. Rewrite the evaluation using only numbers from the digest.")
+def _prompt(digest_json: str, offenders: set[str] | None = None,
+            blocked: str | None = None) -> str:
+    head = f"<digest>{digest_json}</digest>"
+    if offenders:
+        bad = ", ".join(sorted(offenders))
+        return (f"{head}\n"
+                f"Your previous answer contained numbers that are not in the digest: "
+                f"{bad}. Rewrite the evaluation using only numbers from the digest.")
+    if blocked:
+        # The model cannot see the guardrail's verdict, so name the section and
+        # the offence. Grounding is what fails here in practice: a section that
+        # explains or interprets rather than reports scores far below the
+        # threshold even when every number in it is real.
+        return (f"{head}\n"
+                f"Your previous answer failed the automatic grounding check in the "
+                f"section {blocked!r}: it contained claims that do not follow from "
+                f"the digest. Rewrite the whole evaluation. In every section, state "
+                f"only what the digest shows. Do not explain or interpret why a "
+                f"figure moved, do not link two figures as cause and effect, and do "
+                f"not draw conclusions about what the numbers mean.")
+    return head
 
 
 def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> list[dict]:
@@ -255,8 +283,11 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> li
 
     digest_json = canonical_json(digest)
     offenders: set[str] = set()
+    blocked: str | None = None
     for attempt in range(retries + 1):
-        result = agent(_prompt(digest_json, offenders if attempt else None),
+        result = agent(_prompt(digest_json,
+                               offenders if attempt else None,
+                               blocked if attempt else None),
                        structured_output_model=MeetEvaluation)
         # A block is a failure, not a fallback — and it must be detected
         # explicitly. Strands leaves guardrail_redact_output False and does not
@@ -274,7 +305,12 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> li
             sections = [{"heading": s.heading, "body": s.body}
                         for s in report.sections]
             # Last gate before the caller caches and publishes this text.
-            guard.check(sections, digest_json)
-            return sections
+            blocked = guard.check(sections, digest_json)
+            if blocked is None:
+                return sections
+    if blocked:
+        raise EvaluationError(
+            f"the guardrail blocked the section {blocked!r} after "
+            f"{retries} retry")
     raise EvaluationError(
         f"numbers not in digest after {retries} retry: {sorted(offenders)}")

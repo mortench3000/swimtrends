@@ -191,19 +191,55 @@ def test_a_block_names_the_offending_section():
     guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3",
                            client=client)
     bodies = ["612 point.", "612 point.", "612 point i tredje.", "612 point."]
-    fake = FakeAgent([{"heading": h, "body": b}
-                      for h, b in zip(ag.HEADINGS, bodies)])
+    report = [{"heading": h, "body": b} for h, b in zip(ag.HEADINGS, bodies)]
+    fake = FakeAgent(report, [dict(s) for s in report])   # the retry offends too
     with pytest.raises(ag.EvaluationError, match=ag.HEADINGS[2]):
         ag.evaluate(DIGEST, agent=fake, guard=guard)
-    # Stops at the first blocked section rather than paying for the rest.
-    assert len(client.calls) == 3
+    # Each attempt stops at the first blocked section rather than paying for
+    # the rest: 3 calls, then the retry's 3.
+    assert len(client.calls) == 6
 
 
 def test_evaluate_raises_when_the_output_guardrail_intervenes():
     guard = _guard("GUARDRAIL_INTERVENED")
-    fake = FakeAgent(_sections("612 point."))
+    fake = FakeAgent(_sections("612 point."), _sections("612 point."))
     with pytest.raises(ag.EvaluationError, match="guardrail"):
         ag.evaluate(DIGEST, agent=fake, guard=guard)
+
+
+def test_a_guardrail_block_is_retried_like_a_bad_number():
+    """A grounding block is the same class of failure as a fabricated number —
+    one section drifted off the digest — and it costs the whole meet's section
+    on the page. Measured on the first real run against a working guardrail: 2
+    of 3 meets were blocked, each on a single section carrying a causal claim
+    ("dette skyldes …", "er således en væsentlig forklarende faktor"), which
+    SYSTEM_PROMPT rule 6 already forbids. The retry that already exists for
+    numbers recovers those; without it, a compliant report on the second
+    attempt is thrown away unread.
+    """
+    client = FakeGuardrailClient()
+    client.action_for = {"skyldes": "GUARDRAIL_INTERVENED"}
+    guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3", client=client)
+    fake = FakeAgent(_sections("612 point. Dette skyldes flere deltagere."),
+                     _sections("612 point."))
+    out = ag.evaluate(DIGEST, agent=fake, guard=guard)
+    assert len(fake.prompts) == 2
+    assert "612 point." == out[0]["body"]
+    # The rewrite instruction has to name the offence, or the model has nothing
+    # to correct — it cannot see the guardrail's verdict.
+    assert "grounding" in fake.prompts[1].lower() or "digest" in fake.prompts[1]
+
+
+def test_a_guardrail_retry_names_the_blocked_section():
+    client = FakeGuardrailClient()
+    client.action_for = {"tredje": "GUARDRAIL_INTERVENED"}
+    guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3", client=client)
+    bodies = ["612 point.", "612 point.", "612 point i tredje.", "612 point."]
+    fake = FakeAgent([{"heading": h, "body": b}
+                      for h, b in zip(ag.HEADINGS, bodies)],
+                     _sections("612 point."))
+    ag.evaluate(DIGEST, agent=fake, guard=guard)
+    assert ag.HEADINGS[2] in fake.prompts[1]
 
 
 def test_evaluate_guards_only_the_report_it_is_about_to_return():
@@ -364,7 +400,7 @@ def test_build_agent_refuses_a_blank_guardrail_id(bad):
 # generation would have mixed text from two different prompts under one cache
 # key -- the cache-determinism guarantee failing silently, which is the only way
 # it can fail. Update these hashes in the same commit as the version bump.
-SYSTEM_PROMPT_SHA256 = "4ba64bcf2474811773feac1dfa611277fe67d147a63a3c5d671585c405503758"
+SYSTEM_PROMPT_SHA256 = "27f9a19b6b6d76d2b77d8dedd7d56b1296272adecbd69b3901de48b89d8889d7"
 SCHEMA_SHA256 = "a0e4c564478c9aac65094b12e4c485eac0b38417037673131caff49653763923"
 
 
