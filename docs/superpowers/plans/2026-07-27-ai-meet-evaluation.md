@@ -18,7 +18,7 @@ The spec has been brought fully in line; see it for the reasoning.
 
 | Plan says | As shipped |
 | --- | --- |
-| `GROUNDING_THRESHOLD = 0.7` (Global Constraints, Task 7's test and stack) | **0.85** grounding / 0.5 relevance. Both live in `swimtrends_evaluation_stack.py` module constants. |
+| `GROUNDING_THRESHOLD = 0.7` (Global Constraints, Task 7's test and stack) | **0.5** grounding, **no `RELEVANCE` filter at all**, and the report is checked **one section at a time** (four `ApplyGuardrail` calls per meet). Measured, not guessed: at 0.85 on the whole report, six real reports scored 0.40–0.81 and every one was blocked; the same reports scored 0.63–0.95 section by section against 0.00–0.34 for deliberately ungrounded sections. `RELEVANCE` was removed rather than lowered — a physique-violation probe scored 0.70 relevance against 0.36 for an honest section, so it is anti-correlated here. The `query` block stays in the request because `ApplyGuardrail` raises `ValidationException` without it whenever a grounding policy exists. |
 | Three denied topics | **Four** — `PersonalDetails` added, because age/school/personal detail about a minor tripped none of the first three. Plus an explicit `content_policy_config`: HATE/INSULTS/SEXUAL at MEDIUM in / HIGH out, VIOLENCE/MISCONDUCT MEDIUM both ways, PROMPT_ATTACK MEDIUM input-only. |
 | Guardrail applied inline on the Converse call | Inline **and** explicitly. Inline only ever assesses the input (structured output is a forced tool call, so the prose never appears in a text block, and the grounding qualifiers cannot be sent). The published text goes through `ApplyGuardrail` (`OutputGuard`) with the digest tagged `grounding_source` and a fixed Danish instruction tagged `query`. That call is the enforcement. |
 | Version description embeds the grounding threshold | Embeds `policy=<sha256[:12]>` over the **whole** policy — topics, content filters, both thresholds, both blocked messages. A description that tracked only the threshold would let a topic or filter change fail to publish a new version. |
@@ -29,7 +29,7 @@ The spec has been brought fully in line; see it for the reasoning.
 | Footer copy verbatim, "Alle tal kan efterprøves i tabellerne ovenfor" | "Alle tal stammer fra stævnets egne data og er maskinelt kontrolleret." The digest carries a sixth season and per-stroke medians the page does not render, so the original claim was false as shipped. The `· AI-genereret, eksperimentelt` summary suffix is unchanged. |
 | `written == 0` exit floor | Proportional: exits non-zero when `skipped > written`, and every skip path deletes that meet's stale `evaluation.json`. |
 | `strands-agents`/`pydantic` in `requirements.txt` | Moved to `requirements-eval.txt`, pulled in by `requirements-dev.txt` — both Fargate images install `requirements.txt` and import neither. |
-| Per-task test counts (Task 1's "164 before this task", etc.) | The `164` baseline was correct at `23e9044`. Final counts after the fix waves: **st-scrape 260, swimtrends-app 40, web 36.** |
+| Per-task test counts (Task 1's "164 before this task", etc.) | The `164` baseline was correct at `23e9044`. Final counts after the fix waves: **st-scrape 267, swimtrends-app 43, web 36.** |
 
 ## Global Constraints
 

@@ -136,7 +136,12 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   explicit call is the enforcement**: the guardrail attached inline to the
   Converse call only ever assesses the input, because structured output arrives
   inside a forced tool call rather than a text block. Don't "simplify" it away.
-  See [`docs/analytics.md`](docs/analytics.md).
+  Grounding is checked **one section at a time at 0.5** (four `ApplyGuardrail`
+  calls per meet) with no `RELEVANCE` filter — both measured; a concatenated
+  four-section report scores below any threshold a truthful report can reach, so
+  the earlier whole-report check at 0.85 blocked every meet. Known gap: the
+  `PersonalCriticism` topic does not actually fire, so only the system prompt
+  enforces that one. See [`docs/analytics.md`](docs/analytics.md).
 
 ## Development conventions
 - **TDD.** Write the failing test first, watch it fail, then implement. App tests

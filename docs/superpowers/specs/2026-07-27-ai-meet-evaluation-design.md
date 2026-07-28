@@ -239,9 +239,9 @@ version — never `DRAFT`**:
   data.
 - **Contextual grounding check** with the digest as `grounding_source`, the
   instruction the report answers as `query`, and the report as the guarded
-  content. Thresholds 0.85 grounding / 0.5 relevance. Grounding runs on
-  `source='OUTPUT'` only. The report is well under the 5,000-character response
-  limit and the digest well under the 100,000-character source limit.
+  content. Threshold 0.5 grounding, no relevance filter (see below). Grounding
+  runs on `source='OUTPUT'` only. The report is well under the 5,000-character
+  response limit and the digest well under the 100,000-character source limit.
 
 > **Corrected during implementation: how the guardrail is applied.** The original
 > design applied it *inline on the Converse call* only. That cannot work here.
@@ -255,7 +255,31 @@ version — never `DRAFT`**:
 > qualified `query`, and the report unqualified. That call is where the denied
 > topics and the grounding check actually run — one extra call per generated
 > meet, none on a cache hit. Until it existed, contextual grounding never ran at
-> any threshold, so 0.85 is an untuned starting point.
+> any threshold, so 0.85 was an untuned starting point.
+
+> **Corrected during implementation: the grounding check is per section, at 0.5,
+> with no relevance filter.** Once grounding actually ran, 0.85 on the whole
+> report blocked 100% of real reports — six of them, on `GROUNDING` alone, at
+> 0.40–0.81 with no topic or content filter firing. Concatenation is the cause:
+> the same six reports scored 0.63–0.95 when each section was scored on its own,
+> while deliberately ungrounded sections against the same digest scored 0.00–0.34
+> (invented number 0.10, causal claim 0.00, inferred geography 0.34) and a plain
+> recitation of digest facts scored 0.97. So `OutputGuard` checks **one section
+> at a time** — four `ApplyGuardrail` calls per generated meet, stopping at the
+> first block, which names the offending section — at a threshold of **0.5**,
+> mid-way through a wide measured gap. The `RELEVANCE` filter is **removed**, not
+> lowered: with one generic query per meet it carries no signal, and is in fact
+> anti-correlated — the physique-violation probe scored 0.70 relevance against
+> 0.36 for the honest "Discipliner i bevægelse" section. The `query` block stays
+> in the request even so, because `ApplyGuardrail` rejects the call with a
+> `ValidationException` when a contextual grounding policy is configured and the
+> query is absent.
+>
+> One gap found while measuring, deliberately left for a later guardrail
+> version: **`PersonalCriticism` does not fire.** Blatant criticism of a named
+> swimmer passes untouched, and the `INSULTS` content filter at HIGH output
+> strength does not catch it either. The other three topics were probed and do
+> fire. The system prompt's rule 3 is the only thing enforcing that one today.
 
 A guardrail block on either call is a failure, not a fallback: the meet is
 skipped and nothing is written to the cache.

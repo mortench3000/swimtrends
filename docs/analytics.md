@@ -175,18 +175,47 @@ the real cost per generated meet is a little higher than the table says.
 (`TalentProjection`, `PhysiqueAndHealth`, `PersonalCriticism`,
 `PersonalDetails`), content filters (HATE / INSULTS / SEXUAL at MEDIUM input and
 HIGH output, VIOLENCE / MISCONDUCT at MEDIUM both ways, PROMPT_ATTACK MEDIUM on
-input only), and a contextual grounding check at 0.85 grounding / 0.5 relevance.
+input only), and a contextual grounding check at 0.5 — `GROUNDING` only, no
+`RELEVANCE` filter.
 
 The grounding check needs the digest tagged `grounding_source` and the question
 tagged `query`, and Strands sends neither through a plain-string prompt — so
 until the report started going through an explicit `ApplyGuardrail` call
 (`evaluation/agent.py`, `OutputGuard`), **contextual grounding never ran at any
-threshold**, and the denied topics only ever assessed the input. What it is meant
-to catch is something like a model inferring geographic spread from a bare club
-count — a claim the deterministic number check cannot see either, since it isn't a
-number. Whether it does is untested: the check has never run, so 0.85 is an
-untuned starting point and the first real batch is the first time it can block
-anything.
+threshold**, and the denied topics only ever assessed the input. What it catches
+is something like a model inferring geographic spread from a bare club count — a
+claim the deterministic number check cannot see either, since it isn't a number.
+
+The threshold and the shape of the check are measured, not guessed, and the two
+are inseparable — **the report is checked one section at a time**, four
+`ApplyGuardrail` calls per generated meet:
+
+| what was scored | grounding score |
+| --- | --- |
+| six real reports, whole report as one block | 0.40 – 0.81 |
+| those same reports, section by section | 0.63 – 0.95 |
+| deliberately ungrounded sections (invented number, causal claim, inferred geography, talent projection) | 0.00 – 0.34 |
+| a plain recitation of digest facts | 0.97 |
+
+Concatenating four sections depresses the score below anything a truthful report
+reaches, so the original whole-report check at 0.85 blocked 100% of real reports;
+per section, 0.5 sits in the middle of a wide gap. A block names the offending
+section. **Raising the threshold without re-measuring per section will block
+every meet.**
+
+`RELEVANCE` was removed rather than lowered: it carries no signal here. The
+physique-violation probe scored 0.70 relevance — higher than the *honest*
+"Discipliner i bevægelse" section at 0.36. With one generic query for every meet
+it measures "does this text answer the question", which every section does about
+equally. The `query` block stays in the request even so, because
+`ApplyGuardrail` rejects the call with a `ValidationException` when a grounding
+policy is configured and the query is absent.
+
+One caveat found while measuring: the `PersonalCriticism` topic **does not
+fire**. Blatant criticism of a named swimmer passes the guardrail untouched
+(the INSULTS content filter does not catch it either, at HIGH output strength).
+The other three topics were probed and do fire. The system prompt is the only
+thing enforcing that rule today.
 
 Config — all three are required in every mode, `--dry-run` included, because the
 guardrail's identity is part of the cache key: without it a dry run computes a key
