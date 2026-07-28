@@ -183,7 +183,16 @@ def evaluate(digest: dict, *, agent, retries: int = 1) -> list[dict]:
     for attempt in range(retries + 1):
         result = agent(_prompt(digest_json, offenders if attempt else None),
                        structured_output_model=MeetEvaluation)
+        # A block is a failure, not a fallback — and it must be detected
+        # explicitly. Strands leaves guardrail_redact_output False and does not
+        # raise, so without these two checks a block surfaced only as an
+        # incidental AttributeError on report.sections (a blocked response has
+        # no tool-use block), which run() logged as an unexplained traceback.
+        if getattr(result, "stop_reason", None) == "guardrail_intervened":
+            raise EvaluationError("the guardrail blocked the Converse call")
         report = result.structured_output
+        if report is None:
+            raise EvaluationError("the model returned no structured output")
         text = "\n".join(s.body for s in report.sections)
         offenders = check_numbers(text, digest)
         if not offenders:

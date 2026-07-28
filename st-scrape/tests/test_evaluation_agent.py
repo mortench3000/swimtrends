@@ -15,12 +15,18 @@ DIGEST = {
 
 
 class FakeResult:
-    def __init__(self, sections):
-        self.structured_output = ag.MeetEvaluation(sections=sections)
+    def __init__(self, sections, stop_reason="tool_use"):
+        self.structured_output = (None if sections is None
+                                  else ag.MeetEvaluation(sections=sections))
+        self.stop_reason = stop_reason
 
 
 class FakeAgent:
-    """Stands in for a Strands Agent: records prompts, returns canned reports."""
+    """Stands in for a Strands Agent: records prompts, returns canned reports.
+
+    A report of None models an absent structured_output; pass a FakeResult
+    directly to control stop_reason.
+    """
     def __init__(self, *reports):
         self.reports = list(reports)
         self.prompts = []
@@ -28,7 +34,8 @@ class FakeAgent:
 
     def __call__(self, prompt, **kwargs):
         self.prompts.append(prompt)
-        return FakeResult(self.reports.pop(0))
+        report = self.reports.pop(0)
+        return report if isinstance(report, FakeResult) else FakeResult(report)
 
 
 def _sections(body):
@@ -72,6 +79,26 @@ def test_evaluate_does_not_carry_history_between_meets():
     fake.messages = [{"role": "user", "content": "an earlier meet's conversation"}]
     ag.evaluate(DIGEST, agent=fake)
     assert fake.messages == []
+
+
+def test_evaluate_raises_when_the_converse_call_was_blocked_by_the_guardrail():
+    """A guardrail block is a failure, not a fallback: the meet is skipped and
+    nothing is written. Before this check the block was caught only
+    incidentally — a blocked response carries no tool-use block, so
+    structured_output ended up absent and `report.sections` raised
+    AttributeError, which run()'s generic except swallowed as "evaluation
+    failed". That is an undocumented SDK path, and it told the operator
+    nothing about why the meet was skipped."""
+    fake = FakeAgent(FakeResult(None, stop_reason="guardrail_intervened"))
+    with pytest.raises(ag.EvaluationError, match="guardrail"):
+        ag.evaluate(DIGEST, agent=fake)
+    assert len(fake.prompts) == 1          # no retry: a block is not retried
+
+
+def test_evaluate_raises_when_the_model_returns_no_structured_output():
+    fake = FakeAgent(None)
+    with pytest.raises(ag.EvaluationError, match="structured output"):
+        ag.evaluate(DIGEST, agent=fake)
 
 
 def test_schema_rejects_a_wrong_heading_set():

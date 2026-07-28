@@ -155,6 +155,38 @@ def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
     assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
 
 
+def test_a_guardrail_blocked_response_writes_nothing_to_the_cache(
+        tmp_path, monkeypatch, caplog):
+    """The spec's own requirement: "A guardrail block is a failure, not a
+    fallback: the meet is skipped and nothing is written to the cache." The
+    real ag.evaluate runs here (only the Strands agent is faked), so this
+    exercises the actual block detection rather than a stubbed raise — and the
+    log has to name the guardrail, not an incidental AttributeError, or a
+    systematically-blocking prompt is undiagnosable across 37 meets."""
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+
+    class BlockedAgent:
+        messages = []
+
+        def __call__(self, prompt, **kwargs):
+            class Blocked:
+                stop_reason = "guardrail_intervened"
+                structured_output = None
+            return Blocked()
+
+    monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: BlockedAgent())
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert cache.get(client, CATEGORY, MEET_A, key) is None
+    assert not (tmp_path / CATEGORY).exists()
+    assert "guardrail" in caplog.text.lower()
+    assert "AttributeError" not in caplog.text
+
+
 def test_a_cache_get_error_skips_that_meet_and_the_batch_continues(tmp_path, monkeypatch):
     """The Critical: a transient S3 error (e.g. SlowDown) on one meet must not
     abort meets after it. Regression test for the widened per-meet catch-all
