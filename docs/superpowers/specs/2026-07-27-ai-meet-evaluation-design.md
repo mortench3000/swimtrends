@@ -21,7 +21,11 @@ static JSON. There is no runtime LLM endpoint and no per-view cost.
 ## Goals
 
 - A coach-style read of each meet that a human would recognise as informed.
-- Every number in the text verifiable against the data already on the page.
+- Every number in the text machine-verifiable against the digest the meet's own
+  data produced. (This was originally "against the data already on the page" —
+  struck during implementation: the digest deliberately carries a sixth season of
+  history and per-stroke medians that the page does not render, so the check is
+  against the digest and the page copy says so.)
 - Deterministic output: same data + same prompt + same model → byte-identical text.
 - Zero cost and zero latency per page view; no public endpoint to abuse.
 - A measured basis for choosing the model (quality vs price/performance).
@@ -43,11 +47,12 @@ make web-refresh
  ├─ python -m evaluation --out web/public/data      # NEW: seconds on cache hit
  │    for each (category, meet):
  │      digest = digest.build(con, cat, meet)             # pure SQL, deterministic
- │      key    = sha256(canonical_json({digest, prompt_v, schema_v, model_id}))
+ │      key    = sha256(canonical_json({digest, prompt_v, schema_v, model_id,
+ │                                      guardrail_id, guardrail_v, max_tokens}))
  │      s3://swimtrends-meet-data/evaluations/<cat>/<meet>/<key>.json
  │        hit  → reuse verbatim (no model call, no cost)
- │        miss → Strands agent → number check → store under key
- │      write <out>/<cat>/<meet>/evaluation.json  (only if we have one)
+ │        miss → Strands agent → number check → ApplyGuardrail → store under key
+ │      write <out>/<cat>/<meet>/evaluation.json  (else delete a stale one)
  └─ aws s3 sync web/public/data … --delete    # picks up evaluation.json
 ```
 
@@ -60,14 +65,17 @@ The evaluation step opens its own `analytics.loader.connect()`. The digest
 queries are cheap aggregates (seconds per meet), so it does not piggyback on
 webbuild's slow per-race loop.
 
-### Why the cache key includes prompt, schema and model
+### Why the cache key includes prompt, schema, model and guardrail
 
 Keying on the data alone would let a prompt tweak silently change published text
-on the next refresh. Including `prompt_version`, `schema_version` and `model_id`
-means:
+on the next refresh. Including `prompt_version`, `schema_version`, `model_id`,
+the guardrail's id and numbered version, and the token budget means:
 
 - Unchanged inputs → the stored text is reused forever; no drift between refreshes.
 - A deliberate prompt or model change → every meet regenerates, visibly and on purpose.
+- A **tightened guardrail** likewise regenerates every meet. The guardrail is
+  half the safety envelope, so text written under a laxer policy must not keep
+  being republished unexamined after the policy moves.
 - **Revoke** = `python -m evaluation --force [--meets …]`, or delete the S3 object.
 
 `PROMPT_VERSION` and `SCHEMA_VERSION` are module constants in `agent.py`, bumped
@@ -100,9 +108,11 @@ digest = {
   "facts":   {"entrants", "events", "clubs", "juniors",
               "median_points", "elite_median_points", "top_points"},
   "season_history": [ {"season", "entrants", "clubs",
-                       "median_points", "elite_median_points"}, … up to 5 ],
+                       "median_points", "elite_median_points"}, … up to 6 ],
   "top_swims":      [ {"name", "club", "event", "time", "points", "rank"}, … 10 ],
-  "by_stroke":      [ {"stroke", "dist_group", "median_points", "prev5_median"}, … ],
+  "by_stroke":      [ {"stroke", "dist_group", "median_points", "prev5_median",
+                       "delta"}, … ],
+  "derived":        {"<metric>_vs_prev5_pct": …},   # rounded % deltas
 }
 ```
 
@@ -117,6 +127,10 @@ digest = {
 - `dist_group` buckets distances as sprint (50/100), middle (200/400), long
   (800/1500) so the "disciplines in motion" section has something coarse enough
   to be true.
+- `derived` and `by_stroke[].delta` are **precomputed** so the report can quote a
+  percentage or a stroke's movement without the model doing arithmetic — the
+  prompt forbids calculating, so anything not precomputed here can only be
+  described in words. See the number check below.
 - Coverage is real: 37 meets, seasons 2016–2026, 5 categories. A meet with fewer
   than five prior seasons produces a shorter `season_history` and the prompt must
   handle that without inventing a comparison.
@@ -148,9 +162,15 @@ report = result.structured_output
   reserved 1:1 against the TPM quota at request start, so an oversized value
   blocks concurrency for nothing.
 - Prompt caching with the static system prompt first and the digest last.
-- **Model access is verified before the batch runs** (a not-enabled model fails
-  the first Converse call with `AccessDeniedException`, which we would rather see
-  on meet 1 than meet 30).
+
+> **Corrected during implementation.** This section originally also claimed
+> "model access is verified before the batch runs". There is no pre-flight probe,
+> and none was added: a not-enabled model raises `AccessDeniedException` on every
+> meet and the run exits non-zero having published nothing, which is the same
+> safe outcome as a probe, only noisier. `cache_prompt="default"` was also
+> dropped — strands deprecated it, and at ~800 tokens `SYSTEM_PROMPT` is below
+> the minimum cacheable prompt length for these models, so it could never have
+> produced a hit.
 
 ### Report shape (`MeetEvaluation`)
 
@@ -192,10 +212,18 @@ age, school, or any personal detail beyond club affiliation.
 
 ### Guardrail (CDK, versioned)
 
-One Bedrock Guardrail, defined in `swimtrends-app`, applied inline on the
-Converse call at a **numbered version — never `DRAFT`**:
+One Bedrock Guardrail, defined in `swimtrends-app`, applied at a **numbered
+version — never `DRAFT`**:
 
-- Content filters at service defaults.
+- **Content filters**, explicitly configured (there is no such thing as a
+  service default: omit `content_policy_config` and the guardrail has no content
+  filters at all). HATE / INSULTS / SEXUAL at `MEDIUM` input and `HIGH` output;
+  VIOLENCE / MISCONDUCT at `MEDIUM` both ways; `PROMPT_ATTACK` at `MEDIUM` on
+  input only. Output strengths are the ones that matter — the input is our own
+  prompt plus a numeric digest, the output is what gets published next to a
+  minor's name. PROMPT_ATTACK is deliberately not `HIGH`: Bedrock evaluates the
+  whole untagged input, including our instruction-dense system prompt, so `HIGH`
+  risks blocking every meet.
 - **Denied topics for all four blocked categories above** — `TalentProjection`,
   `PhysiqueAndHealth`, `PersonalCriticism`, `PersonalDetails`. The fourth was
   added during implementation: the first three left age/school/personal detail
@@ -209,15 +237,28 @@ Converse call at a **numbered version — never `DRAFT`**:
   statements (the digest carries a `juniors` count, and the junior categories are
   defined by an age band). A denied topic targets the harm without breaking the
   data.
-- **Contextual grounding check** with the digest as `grounding_source`, the user
-  turn as `query`, and the report as the guarded content. Starting thresholds
-  0.7 grounding / 0.5 relevance, tuned from the model-eval run's false-positive
-  rate. Grounding runs on `source='OUTPUT'` only. The report is well under the
-  5,000-character response limit and the digest well under the 100,000-character
-  source limit.
+- **Contextual grounding check** with the digest as `grounding_source`, the
+  instruction the report answers as `query`, and the report as the guarded
+  content. Thresholds 0.85 grounding / 0.5 relevance. Grounding runs on
+  `source='OUTPUT'` only. The report is well under the 5,000-character response
+  limit and the digest well under the 100,000-character source limit.
 
-A guardrail block is a failure, not a fallback: the meet is skipped and nothing
-is written to the cache.
+> **Corrected during implementation: how the guardrail is applied.** The original
+> design applied it *inline on the Converse call* only. That cannot work here.
+> Structured output is a forced tool call in strands, so the prose comes back
+> inside `toolUse.input` rather than a text block — a traced production call
+> returned no output assessment at all — and the grounding source and query must
+> be `qualifiers` on guard content blocks, which a plain-string prompt cannot
+> carry. So the inline guardrail assesses the input, and the *published text* is
+> checked by an explicit `ApplyGuardrail` call (`OutputGuard`) with three content
+> blocks: the digest qualified `grounding_source`, the fixed Danish instruction
+> qualified `query`, and the report unqualified. That call is where the denied
+> topics and the grounding check actually run — one extra call per generated
+> meet, none on a cache hit. Until it existed, contextual grounding never ran at
+> any threshold, so 0.85 is an untuned starting point.
+
+A guardrail block on either call is a failure, not a fallback: the meet is
+skipped and nothing is written to the cache.
 
 ### Number check (`check.py`)
 
@@ -226,12 +267,17 @@ forever:
 
 1. Extract every numeric literal from the report text.
 2. Each must appear in the digest — times normalised to `m:ss.cc`, integers
-   compared exactly, percentages allowed when derivable from two digest numbers.
-3. Fail → one retry with the offending sentences quoted back to the agent.
+   compared exactly. **Percentages are licensed only when they are literally in
+   `digest.derived`**; nothing is licensed for being *derivable*, which would
+   re-open the arithmetic the prompt forbids. Same for a stroke's movement, which
+   must be `by_stroke[].delta`.
+3. Fail → one retry with the offending **numbers** quoted back to the agent (not
+   the sentences: the numbers are what the check knows, and naming them tells the
+   model precisely what to drop).
 4. Fail again → log and skip the meet.
 
-The cache put happens **only after the check passes**, so a partially-bad report
-is never published.
+The cache put happens **only after the check passes** and only after the
+`ApplyGuardrail` check above, so a partially-bad report is never published.
 
 ## Frontend
 
@@ -246,8 +292,9 @@ is never published.
     {/each}
     <p class="muted fine">
       Denne vurdering er automatisk genereret af en sprogmodel ud fra stævnets tal.
-      Den er eksperimentel og en fortolkning — ikke fakta. Alle tal kan efterprøves
-      i tabellerne ovenfor. Genereret {evaluation.generated_at} · {evaluation.model_label}
+      Den er eksperimentel og en fortolkning — ikke fakta. Alle tal stammer fra
+      stævnets egne data og er maskinelt kontrolleret.
+      Genereret {evaluation.generated_at} · {evaluation.model_label}
     </p>
   </details>
 {/if}
@@ -257,9 +304,10 @@ is never published.
 - **Two-layer disclosure.** The summary line always reads
   "AI-genereret, eksperimentelt" even when collapsed; the footer inside carries
   the full statement that this is an interpretation rather than fact, that the
-  numbers are checkable in the tables above, and which model produced it on which
-  date. Publishing machine-written prose about named people without saying so
-  plainly is the one thing in this design that would be indefensible.
+  numbers come from the meet's own data and are machine-checked, and which model
+  produced it on which date. Publishing machine-written prose about named people
+  without saying so plainly is the one thing in this design that would be
+  indefensible.
 - `dataClient.getEvaluation(cat, meetId)` swallows a 404 → `null` → the section
   is simply absent. The page renders exactly as today.
 
@@ -287,9 +335,21 @@ Any failure — Bedrock throttle, `AccessDeniedException`, guardrail block, numb
 check failing twice, structured-output validation error — logs and skips that
 meet. Consequences by design:
 
-- No `evaluation.json` for that meet → the section is absent → page unchanged.
-- A previously cached, valid report is **never** deleted by a failed regeneration.
-- The 50-minute data refresh never blocks on Bedrock and never fails because of it.
+- No `evaluation.json` for that meet → the section is absent → the rest of the
+  page renders exactly as today. A file an earlier run left there is **deleted**,
+  so a skip can never republish text written from a superseded digest.
+- The **cached** report on S3 is never deleted by a failed regeneration, and the
+  bucket is versioned, so re-running restores the section without a model call.
+- `webbuild` itself never blocks on Bedrock: the 50-minute rebuild is a separate
+  step that completes before the evaluation step starts.
+
+> **Corrected during implementation.** This section originally also promised that
+> `web-refresh` "never fails because of" Bedrock. It can, deliberately: a run that
+> skips more meets than it writes exits non-zero, which stops `make` before the
+> `--delete` sync. That is the point — a systemic failure would otherwise strip
+> every skipped meet's section from the live site. A minority of skips in a
+> healthy batch still exits 0. The cost is that a failed run leaves the *local*
+> `web/public/data` short those sections while the live site stays untouched.
 
 ## Testing (TDD, no network)
 
@@ -317,9 +377,12 @@ run by hand.
 - One Guardrail. One S3 prefix (`evaluations/`) on the existing versioned bucket.
 - ~37 model calls for a full regeneration; cents. €0 for a refresh where no
   digest changed.
-- No new Lambda, container, endpoint, or IAM role beyond `bedrock:InvokeModel*`
-  scoped to the exact chosen model ARN (never a wildcard) for the operator
-  running the batch.
+- No new Lambda, container, endpoint, or IAM role. The operator running the batch
+  needs `bedrock:InvokeModel*` scoped to the exact chosen model /
+  inference-profile ARN (never a wildcard), `bedrock:ApplyGuardrail` on the
+  guardrail ARN — required both to invoke a model with a guardrail and for the
+  explicit output check — and `s3:GetObject`/`s3:PutObject` under the
+  `evaluations/` prefix.
 - `web-eval` and `web-refresh` remain manual, matching the current
   deploy-when-needed convention.
 
