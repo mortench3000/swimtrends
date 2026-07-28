@@ -13,20 +13,19 @@ _TOKEN = re.compile(r"\d+:\d{1,2}[.,]\d{1,2}|\d+(?:[.,]\d+)?")
 
 
 def _norm(token: str) -> str:
-    """Danish decimal comma -> dot; drop a thousands separator-free integer's
-    leading zeros only when it would still be non-empty."""
+    """Danish decimal comma -> dot. Nothing else: a token's digits are compared
+    as written, so leading zeros are significant."""
     return token.replace(",", ".")
 
 
 def _time_variants(value: str) -> set[str]:
     """A digest time licenses its own form and the way prose usually writes it:
-    '0:52.00' also licenses '52.00'."""
+    every time also licenses its bare seconds part, so '0:52.00' licenses
+    '52.00' and '2:11.40' licenses '11.40'."""
     out = {_norm(value)}
     m = re.fullmatch(r"(\d+):(\d{1,2}[.,]\d{1,2})", value or "")
     if m:
         out.add(_norm(m.group(2)))
-        if m.group(1) == "0":
-            out.add(_norm(m.group(2)))
     return out
 
 

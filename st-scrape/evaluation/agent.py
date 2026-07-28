@@ -18,6 +18,7 @@ from pydantic import BaseModel, field_validator
 from strands import Agent
 from strands.models import BedrockModel
 
+from evaluation.cache import canonical_json
 from evaluation.check import check_numbers
 
 PROMPT_VERSION = "5"
@@ -222,8 +223,6 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> li
     `guard` is required, not optional: a caller that reaches here without one
     would publish unguarded prose about named minors, which is a bug in the
     caller rather than a mode this function supports."""
-    from evaluation.cache import canonical_json      # local: avoids a cycle
-
     if guard is None:
         raise ValueError("evaluate() requires an OutputGuard, not None")
 

@@ -112,14 +112,26 @@ def test_force_on_hit_calls_evaluate_and_overwrites_the_cache(tmp_path, monkeypa
     assert stored["sections"] == new_sections
 
 
-def test_digest_failure_skips_the_meet_and_writes_nothing(tmp_path):
+def test_digest_failure_skips_the_meet_and_writes_nothing(tmp_path, monkeypatch, caplog):
+    """dg.build has to be made to raise: a bogus meet id does NOT raise, it
+    degrades to an all-zero digest, so passing one here exercised the
+    empty-digest guard instead (a duplicate of the test below) and left the
+    digest-failure except uncovered. A real digest failure is a broken view or
+    an unreadable Parquet file. The log assertion is what discriminates that
+    handler from the outer catch-all, which would otherwise absorb the raise
+    and make the same stats appear."""
     con = digest_con()
     _bucket()
 
-    stats = cli.run(con, tmp_path, meets=[(CATEGORY, "NOPE")], **KWARGS)
+    def _boom(*a, **k):
+        raise RuntimeError("no such view: results_by_category")
+    monkeypatch.setattr(cli.dg, "build", _boom)
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
 
     assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
-    assert not (tmp_path / CATEGORY).exists()
+    assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
+    assert f"digest failed for {CATEGORY}/{MEET_A}" in caplog.text
 
 
 def test_empty_digest_skips_without_calling_evaluate_or_touching_the_cache(

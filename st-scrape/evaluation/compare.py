@@ -48,6 +48,7 @@ from pathlib import Path
 
 from analytics.loader import connect
 from evaluation import agent as ag
+from evaluation.cache import canonical_json
 from evaluation.check import check_numbers
 from webbuild import digest as dg
 
@@ -93,7 +94,6 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
     Asking a model to write a coach report about a meet with zero scored
     swims wastes a call on nothing, so that's caught and skipped here too,
     before any agent is built — same guard as evaluation/__main__.py's run()."""
-    from evaluation.cache import canonical_json
     t0 = time.monotonic()
     error, sections, offenders = None, [], set()
     tin, tout, usage_ok = 0, 0, False
