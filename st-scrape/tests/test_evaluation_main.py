@@ -67,6 +67,14 @@ class NoopGuard:
         self.checked.append(report_text)
 
 
+@pytest.fixture
+def guardrail_env(monkeypatch):
+    """The guardrail id/version main() requires -- for a --dry-run too, since
+    they are part of the cache key it has to reproduce."""
+    monkeypatch.setenv("EVAL_GUARDRAIL_ID", KWARGS["guardrail_id"])
+    monkeypatch.setenv("EVAL_GUARDRAIL_VERSION", KWARGS["guardrail_version"])
+
+
 @pytest.fixture(autouse=True)
 def no_real_agent(monkeypatch):
     """Every test replaces build_agent; tests that reach evaluate() replace it
@@ -359,15 +367,73 @@ def test_dry_run_never_calls_evaluate_or_put(tmp_path, monkeypatch, prime_cache)
         assert not (tmp_path / CATEGORY).exists()
 
 
+@pytest.mark.parametrize("break_at", ["digest", "empty", "miss"])
+def test_a_dry_run_deletes_no_evaluation(tmp_path, monkeypatch, break_at):
+    """A dry run reports; it does not publish, and `--delete` never follows it.
+    So none of its skip paths may remove a file a real run would republish --
+    including the digest-failure path, which used to delete even under
+    --dry-run while the cache-miss path next to it did not."""
+    con = digest_con()
+    _bucket()
+    meet_id = "NOPE" if break_at == "empty" else MEET_A
+    stale = tmp_path / CATEGORY / meet_id / "evaluation.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps(_cached_payload(CATEGORY, meet_id, "forældet tekst")))
+    if break_at == "digest":
+        monkeypatch.setattr(cli.dg, "build",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, meet_id)], dry_run=True, **KWARGS)
+
+    assert stats["skipped"] == 1
+    assert stale.exists()
+
+
+def test_a_dry_run_looks_up_the_same_cache_key_a_real_run_stores_under(
+        tmp_path, monkeypatch, guardrail_env):
+    """--dry-run exists to report hits and misses, so it has to compute the key
+    a real run writes. It briefly did not: main() exempted --dry-run from the
+    guardrail-env check, the None id/version went into cache_key (which is key
+    material), and every meet came back a miss in the very configuration the
+    docs recommended -- an operator reading `hit=0, skipped=37` would conclude
+    the whole set needed regenerating. Requiring the env for a dry run too keeps
+    one cache-key formula in the system; this pins the keys equal."""
+    con = digest_con()
+    client = _bucket()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A))
+    monkeypatch.setattr(cli, "connect", lambda: con)
+    monkeypatch.setenv("EVAL_MODEL_ID", MODEL_ID)
+
+    looked_up = []
+    real_get = cli.cache.get
+    monkeypatch.setattr(cli.cache, "get",
+                        lambda c, cat, mid, k: looked_up.append(k) or real_get(c, cat, mid, k))
+
+    argv = ["--out", str(tmp_path), "--meets", f"{CATEGORY}/{MEET_A}"]
+    assert cli.main(argv + ["--dry-run"]) == 0
+    assert cli.main(argv) == 0
+
+    assert looked_up == [key, key]
+
+
+def test_main_requires_the_guardrail_env_for_a_dry_run_too(tmp_path, monkeypatch):
+    """A dry run that cannot compute the real key cannot report hits, which is
+    its whole purpose -- so refuse it rather than report misses that aren't."""
+    monkeypatch.delenv("EVAL_GUARDRAIL_ID", raising=False)
+    monkeypatch.delenv("EVAL_GUARDRAIL_VERSION", raising=False)
+
+    with pytest.raises(SystemExit, match="EVAL_GUARDRAIL_ID"):
+        cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run"])
+
+
 def test_main_exits_nonzero_when_meets_were_found_but_nothing_was_written(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, guardrail_env):
     con = digest_con()
     _bucket()
     monkeypatch.setattr(cli, "connect", lambda: con)
     monkeypatch.setattr(cli.ag, "evaluate",
                         lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
-    monkeypatch.setenv("EVAL_GUARDRAIL_ID", "gr-1")
-    monkeypatch.setenv("EVAL_GUARDRAIL_VERSION", "3")
 
     rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
 
@@ -375,7 +441,7 @@ def test_main_exits_nonzero_when_meets_were_found_but_nothing_was_written(
 
 
 def test_main_exits_nonzero_when_more_meets_were_skipped_than_written(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, guardrail_env):
     """written == 0 was the only floor, so throttling that starts partway
     through the batch (written=5, skipped=32) exited 0 and the --delete sync
     proceeded -- publishing five sections and removing the rest. Make the guard
@@ -387,8 +453,6 @@ def test_main_exits_nonzero_when_more_meets_were_skipped_than_written(
     monkeypatch.setattr(cli, "connect", lambda: con)
     monkeypatch.setattr(cli.ag, "evaluate",
                         lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
-    monkeypatch.setenv("EVAL_GUARDRAIL_ID", "gr-1")
-    monkeypatch.setenv("EVAL_GUARDRAIL_VERSION", "3")
 
     # MEET_A hits the cache and is written; the five older meets all fail.
     rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
@@ -397,7 +461,7 @@ def test_main_exits_nonzero_when_more_meets_were_skipped_than_written(
 
 
 def test_main_exits_zero_when_a_single_meet_is_skipped_in_a_healthy_batch(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, guardrail_env):
     """The other side of the proportional guard: routine per-meet skips must
     still exit 0, or a single stubborn meet would block every refresh."""
     con = digest_con()
@@ -408,8 +472,6 @@ def test_main_exits_zero_when_a_single_meet_is_skipped_in_a_healthy_batch(
     monkeypatch.setattr(cli, "connect", lambda: con)
     monkeypatch.setattr(cli.ag, "evaluate",
                         lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
-    monkeypatch.setenv("EVAL_GUARDRAIL_ID", "gr-1")
-    monkeypatch.setenv("EVAL_GUARDRAIL_VERSION", "3")
 
     # five cache hits, only D2021 fails
     rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
@@ -417,7 +479,8 @@ def test_main_exits_zero_when_a_single_meet_is_skipped_in_a_healthy_batch(
     assert rc == 0
 
 
-def test_main_exits_zero_when_dry_run_finds_nothing_to_generate(tmp_path, monkeypatch):
+def test_main_exits_zero_when_dry_run_finds_nothing_to_generate(
+        tmp_path, monkeypatch, guardrail_env):
     """--dry-run is exempt: a zero-written dry run is its normal, successful
     report (it never writes by design), not the systemic-failure case the
     exit-code guard exists for."""
@@ -440,7 +503,7 @@ def test_parse_meets_rejects_a_malformed_entry():
 
 
 @pytest.mark.parametrize("spec", [",", " , ", ",,"])
-def test_main_rejects_a_meets_flag_that_parses_to_nothing(tmp_path, spec):
+def test_main_rejects_a_meets_flag_that_parses_to_nothing(tmp_path, spec, guardrail_env):
     """A filter that parses to zero entries used to be indistinguishable from
     "no filter given": _parse_meets returned [], which is falsy, so run() fell
     through to every meet in the registry. With --force that turns a typo into
@@ -462,8 +525,8 @@ def test_run_treats_an_empty_meet_list_as_empty_not_as_all_meets(tmp_path):
     assert cli.run(con, tmp_path, meets=None, dry_run=True, **KWARGS)["total"] > 0
 
 
-def test_main_rejects_an_explicitly_empty_meets_flag(tmp_path):
-    # --dry-run so the guardrail-env guard doesn't fire first; the empty
-    # --meets check must still happen before any DuckDB/S3 call.
+def test_main_rejects_an_explicitly_empty_meets_flag(tmp_path, guardrail_env):
+    # The empty --meets check must happen before any DuckDB/S3 call, so
+    # --dry-run with the env satisfied still reaches it.
     with pytest.raises(SystemExit, match="empty"):
         cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run", "--meets", ""])

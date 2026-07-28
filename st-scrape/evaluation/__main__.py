@@ -48,7 +48,7 @@ def _parse_meets(spec: str) -> list[tuple[str, str]]:
     return out
 
 
-def _drop_stale(out: Path, category: str, meet_id: str) -> None:
+def _drop_stale(out: Path, category: str, meet_id: str, *, dry_run: bool) -> None:
     """Remove this meet's evaluation.json when the meet is skipped.
 
     webbuild does not clear its output directory and nothing else deletes from
@@ -60,7 +60,13 @@ def _drop_stale(out: Path, category: str, meet_id: str) -> None:
     evaluation.json, so the sync removes its section from the live site. A
     transient failure therefore costs the section until the next run, which is
     the cheap direction of the trade.
+
+    A --dry-run deletes nothing, deliberately: it is a reporting mode, the
+    `--delete` sync never follows it, and a dry run that pruned files would make
+    the next real run's report differ from the one just read.
     """
+    if dry_run:
+        return
     (out / category / meet_id / "evaluation.json").unlink(missing_ok=True)
 
 
@@ -94,7 +100,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
             except Exception:
                 log.exception("digest failed for %s/%s", category, meet_id)
                 stats["skipped"] += 1
-                _drop_stale(out, category, meet_id)
+                _drop_stale(out, category, meet_id, dry_run=dry_run)
                 continue
 
             # A bogus or not-yet-curated meet id doesn't make dg.build raise
@@ -104,7 +110,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 log.warning("empty digest for %s/%s (no scored swims) -- skipping",
                             category, meet_id)
                 stats["skipped"] += 1
-                _drop_stale(out, category, meet_id)
+                _drop_stale(out, category, meet_id, dry_run=dry_run)
                 continue
 
             key = cache.cache_key(digest, prompt_version=ag.PROMPT_VERSION,
@@ -116,6 +122,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
             if payload is not None:
                 stats["hit"] += 1
             elif dry_run:
+                # No _drop_stale: a dry run deletes nothing, on purpose (see there).
                 log.info("would generate %s/%s", category, meet_id)
                 stats["skipped"] += 1
                 continue
@@ -125,7 +132,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 except Exception:
                     log.exception("evaluation failed for %s/%s", category, meet_id)
                     stats["skipped"] += 1
-                    _drop_stale(out, category, meet_id)
+                    _drop_stale(out, category, meet_id, dry_run=dry_run)
                     continue
                 payload = {
                     "category": category, "meet_id": meet_id,
@@ -143,7 +150,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
         except Exception:
             log.exception("evaluation pipeline failed for %s/%s", category, meet_id)
             stats["skipped"] += 1
-            _drop_stale(out, category, meet_id)
+            _drop_stale(out, category, meet_id, dry_run=dry_run)
 
     return stats
 
@@ -167,7 +174,12 @@ def main(argv=None):
         raise SystemExit("no model: pass --model or set EVAL_MODEL_ID")
     guardrail_id = os.environ.get("EVAL_GUARDRAIL_ID")
     guardrail_version = os.environ.get("EVAL_GUARDRAIL_VERSION")
-    if not args.dry_run and not (guardrail_id and guardrail_version):
+    # Required for --dry-run too, even though it calls no model: the guardrail's
+    # identity is part of the cache key, so without it a dry run computes a key
+    # no real run ever stores under and reports every meet as a miss. Reporting
+    # hits and misses is the mode's only purpose, so two exports are cheaper
+    # than a second, mode-conditional key formula.
+    if not (guardrail_id and guardrail_version):
         raise SystemExit(
             "set EVAL_GUARDRAIL_ID and EVAL_GUARDRAIL_VERSION "
             "(from the SwimtrendsEvaluationStack outputs)")
