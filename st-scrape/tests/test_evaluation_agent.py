@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 import boto3
 import pytest
 from botocore.stub import Stubber
@@ -286,6 +289,34 @@ def test_build_agent_refuses_a_blank_guardrail_id(bad):
     Converse call with no error at all."""
     with pytest.raises(ValueError, match="guardrail_id"):
         ag.build_agent(model_id="model-x", guardrail_id=bad, guardrail_version="3")
+
+
+# Pinned so the version constants cannot drift from what they version. Commit
+# bc1cadf on this branch edited SYSTEM_PROMPT without bumping PROMPT_VERSION and
+# was caught only by a human eye during review; had it shipped, the full-set
+# generation would have mixed text from two different prompts under one cache
+# key -- the cache-determinism guarantee failing silently, which is the only way
+# it can fail. Update these hashes in the same commit as the version bump.
+SYSTEM_PROMPT_SHA256 = "4ba64bcf2474811773feac1dfa611277fe67d147a63a3c5d671585c405503758"
+SCHEMA_SHA256 = "a0e4c564478c9aac65094b12e4c485eac0b38417037673131caff49653763923"
+
+
+def test_system_prompt_is_pinned_to_prompt_version():
+    actual = hashlib.sha256(ag.SYSTEM_PROMPT.encode("utf-8")).hexdigest()
+    assert actual == SYSTEM_PROMPT_SHA256, (
+        f"SYSTEM_PROMPT changed (sha256 now {actual}). Bump ag.PROMPT_VERSION "
+        f"(currently {ag.PROMPT_VERSION!r}) so every meet regenerates, then set "
+        f"SYSTEM_PROMPT_SHA256 in this test to the new hash. HEADINGS is "
+        f"interpolated into the prompt, so a heading change lands here too.")
+
+
+def test_output_schema_is_pinned_to_schema_version():
+    schema = json.dumps(ag.MeetEvaluation.model_json_schema(), sort_keys=True)
+    actual = hashlib.sha256(schema.encode("utf-8")).hexdigest()
+    assert actual == SCHEMA_SHA256, (
+        f"MeetEvaluation's JSON schema changed (sha256 now {actual}). Bump "
+        f"ag.SCHEMA_VERSION (currently {ag.SCHEMA_VERSION!r}) so every meet "
+        f"regenerates, then set SCHEMA_SHA256 in this test to the new hash.")
 
 
 def test_model_label_falls_back_to_the_id():
