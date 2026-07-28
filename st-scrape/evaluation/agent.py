@@ -4,6 +4,13 @@ A single Strands agent, a single Converse call per meet, no tools and no
 memory — the digest is the agent's entire world, which is what makes both the
 guardrail's grounding check and the deterministic number check meaningful.
 
+Two guardrail applications, deliberately: the Converse call carries the
+guardrail inline (which on this path only ever assesses the *input* — see
+OutputGuard), and every report that survives the number check is put through
+ApplyGuardrail before it is returned. That second call is the one that
+enforces the four denied topics and contextual grounding on the text we
+publish.
+
 PROMPT_VERSION / SCHEMA_VERSION are part of the cache key: bump either and
 every meet regenerates on the next run. Do that deliberately.
 """
@@ -18,6 +25,11 @@ SCHEMA_VERSION = "1"
 
 REGION = "eu-west-1"
 MAX_TOKENS = 1200
+
+# The instruction the report answers, sent to ApplyGuardrail tagged `query` so
+# the RELEVANCE half of the contextual grounding filter has something to
+# compare the report against.
+GUARD_QUERY = "Skriv en trænervurdering af stævnet."
 
 HEADINGS = (
     "Samlet niveau",
@@ -156,6 +168,44 @@ def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str) -> 
     return Agent(model=model, system_prompt=SYSTEM_PROMPT)
 
 
+class OutputGuard:
+    """The guardrail applied to the generated text, explicitly.
+
+    The inline guardrailConfig on the Converse call does not do this job here.
+    `structured_output_model` is a forced tool call in strands, so the Danish
+    prose arrives inside `toolUse.input` rather than a text block, and a traced
+    production call came back with `modelOutput: []` and no `outputAssessments`
+    key at all — the four denied topics only ever assessed the input, i.e. our
+    own system prompt and digest. Contextual grounding never ran either: it
+    needs the grounding source and the query tagged with `qualifiers`, and
+    Converse cannot receive those through a plain string prompt.
+
+    ApplyGuardrail is text-based and does take those qualifiers, so this is
+    where both halves of the policy actually get enforced. One extra call per
+    *generated* meet, none on a cache hit.
+    """
+
+    def __init__(self, *, guardrail_id: str, guardrail_version: str, client) -> None:
+        self.guardrail_id, self.guardrail_version = numbered_guardrail(
+            guardrail_id, guardrail_version)
+        self.client = client
+
+    def check(self, report_text: str, digest_json: str) -> None:
+        """Raise EvaluationError if the guardrail intervenes on the report."""
+        response = self.client.apply_guardrail(
+            guardrailIdentifier=self.guardrail_id,
+            guardrailVersion=self.guardrail_version,
+            source="OUTPUT",
+            content=[
+                {"text": {"text": digest_json, "qualifiers": ["grounding_source"]}},
+                {"text": {"text": GUARD_QUERY, "qualifiers": ["query"]}},
+                {"text": {"text": report_text}},        # unqualified: guard this
+            ])
+        if response.get("action") == "GUARDRAIL_INTERVENED":
+            raise EvaluationError(
+                f"the guardrail blocked the report: {response.get('assessments')}")
+
+
 def _prompt(digest_json: str, offenders: set[str] | None = None) -> str:
     if not offenders:
         return f"<digest>{digest_json}</digest>"
@@ -165,10 +215,17 @@ def _prompt(digest_json: str, offenders: set[str] | None = None) -> str:
             f"{bad}. Rewrite the evaluation using only numbers from the digest.")
 
 
-def evaluate(digest: dict, *, agent, retries: int = 1) -> list[dict]:
+def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> list[dict]:
     """digest -> [{heading, body}, ...]. Raises EvaluationError if the number
-    check still fails after `retries` rewrites."""
+    check still fails after `retries` rewrites, or if the guardrail intervenes.
+
+    `guard` is required, not optional: a caller that reaches here without one
+    would publish unguarded prose about named minors, which is a bug in the
+    caller rather than a mode this function supports."""
     from evaluation.cache import canonical_json      # local: avoids a cycle
+
+    if guard is None:
+        raise ValueError("evaluate() requires an OutputGuard, not None")
 
     # The docstring's "the digest is the agent's entire world" has to be
     # enforced here, not assumed: a batch caller reusing one Agent across
@@ -196,6 +253,8 @@ def evaluate(digest: dict, *, agent, retries: int = 1) -> list[dict]:
         text = "\n".join(s.body for s in report.sections)
         offenders = check_numbers(text, digest)
         if not offenders:
+            # Last gate before the caller caches and publishes this text.
+            guard.check(text, digest_json)
             return [{"heading": s.heading, "body": s.body} for s in report.sections]
     raise EvaluationError(
         f"numbers not in digest after {retries} retry: {sorted(offenders)}")

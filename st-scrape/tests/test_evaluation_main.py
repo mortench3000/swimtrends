@@ -54,12 +54,23 @@ def _valid_sections(digest, body_extra=""):
     return [{"heading": h, "body": f"{n} deltagere. {body_extra}"} for h in ag.HEADINGS]
 
 
+class NoopGuard:
+    """An OutputGuard that never intervenes. Replacing the real one also stops
+    any test constructing a bedrock-runtime client."""
+    def __init__(self):
+        self.checked = []
+
+    def check(self, report_text, digest_json):
+        self.checked.append(report_text)
+
+
 @pytest.fixture(autouse=True)
 def no_real_agent(monkeypatch):
     """Every test replaces build_agent; tests that reach evaluate() replace it
     too. This fixture only stops an accidental real Bedrock construction if a
     test forgets — evaluate itself is stubbed per-test below."""
     monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: object())
+    monkeypatch.setattr(cli.ag, "OutputGuard", lambda **kw: NoopGuard())
 
 
 def test_cache_hit_skips_evaluate_and_writes_cached_payload_verbatim(tmp_path, monkeypatch):
@@ -185,6 +196,39 @@ def test_a_guardrail_blocked_response_writes_nothing_to_the_cache(
     assert not (tmp_path / CATEGORY).exists()
     assert "guardrail" in caplog.text.lower()
     assert "AttributeError" not in caplog.text
+
+
+def test_an_output_guardrail_block_writes_nothing_to_the_cache(tmp_path, monkeypatch):
+    """The other half: the report passed the number check, so the deterministic
+    gate is happy, and ApplyGuardrail on the assembled text is the only thing
+    left standing between the model and the published page. A block there must
+    reach the same "skip the meet, write nothing" outcome."""
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+
+    class GoodAgent:
+        messages = []
+
+        def __call__(self, prompt, **kwargs):
+            class Result:
+                stop_reason = "tool_use"
+                structured_output = ag.MeetEvaluation(
+                    sections=_valid_sections(digest))
+            return Result()
+
+    class BlockingGuard:
+        def check(self, report_text, digest_json):
+            raise ag.EvaluationError("the guardrail blocked the report: [...]")
+
+    monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: GoodAgent())
+    monkeypatch.setattr(cli.ag, "OutputGuard", lambda **kw: BlockingGuard())
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert cache.get(client, CATEGORY, MEET_A, key) is None
+    assert not (tmp_path / CATEGORY).exists()
 
 
 def test_a_cache_get_error_skips_that_meet_and_the_batch_continues(tmp_path, monkeypatch):

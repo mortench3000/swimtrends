@@ -51,9 +51,15 @@ def _parse_meets(spec: str) -> list[tuple[str, str]]:
 def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: str,
         meets=None, force: bool = False, dry_run: bool = False) -> dict:
     s3 = boto3.client("s3", region_name=ag.REGION)
-    agent = None if dry_run else ag.build_agent(
-        model_id=model_id, guardrail_id=guardrail_id,
-        guardrail_version=guardrail_version)
+    agent = guard = None
+    if not dry_run:
+        agent = ag.build_agent(model_id=model_id, guardrail_id=guardrail_id,
+                               guardrail_version=guardrail_version)
+        # The guardrail applied to the generated text (the inline one on the
+        # Converse call only reaches the input). Same id and numbered version.
+        guard = ag.OutputGuard(
+            guardrail_id=guardrail_id, guardrail_version=guardrail_version,
+            client=boto3.client("bedrock-runtime", region_name=ag.REGION))
     meet_list = meets or _all_meets(con)
     stats = {"total": len(meet_list), "hit": 0, "generated": 0, "skipped": 0, "written": 0}
 
@@ -92,7 +98,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 continue
             else:
                 try:
-                    sections = ag.evaluate(digest, agent=agent)
+                    sections = ag.evaluate(digest, agent=agent, guard=guard)
                 except Exception:
                     log.exception("evaluation failed for %s/%s", category, meet_id)
                     stats["skipped"] += 1
