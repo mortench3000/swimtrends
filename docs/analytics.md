@@ -181,14 +181,16 @@ The grounding check needs the digest tagged `grounding_source` and the question
 tagged `query`, and Strands sends neither through a plain-string prompt — so
 until the report started going through an explicit `ApplyGuardrail` call
 (`evaluation/agent.py`, `OutputGuard`), **contextual grounding never ran at any
-threshold**, and the denied topics only ever assessed the input. The 0.85 value
-is therefore an untuned starting point, not a tested one: expect the first real
-batch to be the first time it can block anything. One thing it is meant to catch
-is a model inferring geographic spread from a bare club count — a claim the
-deterministic number check cannot see either, since it isn't a number.
+threshold**, and the denied topics only ever assessed the input. What it is meant
+to catch is something like a model inferring geographic spread from a bare club
+count — a claim the deterministic number check cannot see either, since it isn't a
+number. Whether it does is untested: the check has never run, so 0.85 is an
+untuned starting point and the first real batch is the first time it can block
+anything.
 
-Config — a real run needs all three; `--dry-run` needs only `EVAL_MODEL_ID`
-(the guardrail check is skipped for it, since it calls no model):
+Config — all three are required in every mode, `--dry-run` included, because the
+guardrail's identity is part of the cache key: without it a dry run computes a key
+no real run stores under and reports every meet as a miss.
 
 ```bash
 export EVAL_MODEL_ID=<bedrock model id>
@@ -212,7 +214,9 @@ both to invoke a model with a guardrail and for the explicit output check), and
 
 Useful flags:
 
-- `--dry-run` — report cache hits and misses without calling the model.
+- `--dry-run` — report cache hits and misses without calling the model. Needs the
+  same three variables as a real run (see above), and deletes nothing: it never
+  prunes a stale `evaluation.json`, since no `--delete` sync follows it.
 - `--meets DM-L/12486` — one meet (or a comma-separated list).
 - `--force` — regenerate and overwrite the cached text. This is the revoke
   switch; the bucket is versioned, so the prior text is retained. It is also the

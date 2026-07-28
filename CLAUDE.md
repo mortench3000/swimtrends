@@ -61,7 +61,8 @@ cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m ingestion.cli \
     query [--sql "…"] | meets [--category X] [--season Y] [--asc] | categories | summary
 
 # AI meet evaluations — dry run (reports cache hits/misses, calls no model)
-# Needs only EVAL_MODEL_ID; a real run also needs EVAL_GUARDRAIL_ID/_VERSION.
+# Needs EVAL_MODEL_ID + EVAL_GUARDRAIL_ID/_VERSION in every mode — the guardrail
+# is in the cache key, so without it a dry run reports every meet as a miss.
 # See docs/analytics.md for how to read those two from the stack outputs.
 cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m evaluation \
     --out ../web/public/data --dry-run
