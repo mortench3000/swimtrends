@@ -8,7 +8,7 @@ Window: the meet's own season plus the five prior seasons ON RECORD (not
 season-5, since a category may have gaps).
 """
 
-from webbuild.queries import _meet_is_combined
+from webbuild.queries import _MEET_RELAY_EVENTS_SQL, _meet_is_combined
 
 WINDOW = 6          # the meet's season + 5 prior
 
@@ -235,6 +235,13 @@ def build(con, category: str, meet_id: str) -> dict:
             _FACTS_SQL, [category, meet_id]).fetchone()))
         hist_rows = con.execute(_HISTORY_SQL, [category, season]).fetchall()
         elite = dict(con.execute(_ELITE_SQL, [category, season]).fetchall())
+
+    # Relay events on top of the individual count, exactly as queries.build_meet
+    # does for the page's "Løb" tile. Without this the digest licenses an events
+    # number that contradicts the tile the reader is told to check it against.
+    # Senior-scoped in both places (there is no junior-relay title).
+    facts["events"] += con.execute(
+        _MEET_RELAY_EVENTS_SQL, [category, meet_id]).fetchone()[0]
 
     facts["elite_median_points"] = elite.get(season)
     hist_cols = ["season", "entrants", "clubs", "median_points"]

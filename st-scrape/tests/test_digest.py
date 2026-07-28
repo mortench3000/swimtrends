@@ -1,5 +1,6 @@
 from tests.evaluation_fixtures import digest_con, gapped_digest_con, junior_digest_con
-from webbuild import digest
+from tests.webbuild_fixtures import relay_con
+from webbuild import digest, queries
 
 
 def test_meet_header():
@@ -17,6 +18,20 @@ def test_facts_are_present_and_scored():
     assert f["top_points"] == 653         # 400 + 20*5 + 5*30 + 3 (last event)
     assert f["median_points"] == 576      # 24 swims; quantile_cont(0.5) of 563,590 -> 576
     assert f["elite_median_points"] == 576
+
+
+def test_events_count_matches_the_page_when_the_meet_has_relays():
+    """The page's "Løb" tile adds relay events on top of the individual count
+    (queries.build_meet), and the digest reuses the same SQL constant but not
+    that addition. So the model was licensed to publish an events count that
+    contradicts the tile directly above it -- every number "correct", the reader
+    misled, which is exactly the defect class check.py cannot see. Compare the
+    two directly so they cannot drift apart again."""
+    con = relay_con()
+    page = queries.build_meet(con, "DM-L", "R2026")
+    d = digest.build(con, "DM-L", "R2026")
+    assert d["facts"]["events"] == page["facts"]["events"]
+    assert d["facts"]["events"] == 2       # 1 individual + 1 relay
 
 
 def test_season_history_is_newest_first_and_capped_at_six_rows():
