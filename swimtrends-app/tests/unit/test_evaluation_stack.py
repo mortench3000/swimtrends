@@ -20,6 +20,12 @@ def _version_description(t):
     return next(iter(versions.values()))["Properties"]["Description"]
 
 
+def _guardrail_properties(t):
+    guardrails = t.find_resources("AWS::Bedrock::Guardrail")
+    assert guardrails, "no guardrail in the template"
+    return next(iter(guardrails.values()))["Properties"]
+
+
 def test_guardrail_blocks_the_four_denied_topics():
     t = _template()
     t.has_resource_properties("AWS::Bedrock::Guardrail", {
@@ -71,6 +77,39 @@ def test_prompt_attack_detection_is_input_only():
     attack = next(f for f in filters if f["Type"] == "PROMPT_ATTACK")
     assert attack["OutputStrength"] == "NONE"
     assert attack["InputStrength"] != "NONE"
+
+
+# The fingerprint below is computed from the module constants, and the guardrail
+# resource is synthesized from those same constants -- but nothing tied the two
+# together, so a mistake in the *wiring* changed the DRAFT, left the fingerprint
+# where it was, published no new version, and let the batch job's pinned version
+# keep serving the old policy while cdk deploy reported success. Three synth-site
+# mutations survived the whole suite: dropping a topic's examples, forcing every
+# content filter's output strength to NONE, and replacing the blocked-output
+# message. The three tests below compare the synthesized template to the
+# constants field by field, so the two cannot diverge.
+def test_every_denied_topic_reaches_the_template_field_by_field():
+    topics = _guardrail_properties(_template())["TopicPolicyConfig"]["TopicsConfig"]
+    assert topics == [
+        {"Name": t["name"], "Type": "DENY", "Definition": t["definition"],
+         "Examples": t["examples"]}
+        for t in mod.DENIED_TOPICS
+    ]
+
+
+def test_every_content_filter_reaches_the_template_field_by_field():
+    filters = _guardrail_properties(_template())["ContentPolicyConfig"]["FiltersConfig"]
+    assert filters == [
+        {"Type": f["type"], "InputStrength": f["input_strength"],
+         "OutputStrength": f["output_strength"]}
+        for f in mod.CONTENT_FILTERS
+    ]
+
+
+def test_both_blocked_messages_reach_the_template():
+    props = _guardrail_properties(_template())
+    assert props["BlockedInputMessaging"] == mod.BLOCKED_INPUT_MESSAGE
+    assert props["BlockedOutputsMessaging"] == mod.BLOCKED_OUTPUT_MESSAGE
 
 
 def test_a_numbered_version_is_published():
