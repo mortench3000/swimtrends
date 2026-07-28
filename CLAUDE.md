@@ -12,7 +12,7 @@ registry + dispatcher Lambda + Fargate scraper, hourly EventBridge cycle).
 ## Repository layout
 | Path | What |
 | --- | --- |
-| `st-scrape/` | **The application.** `scrape_races.py` (scraper), `curate/` (raw→Parquet transform), `analytics/` (DuckDB views + loader), `ingestion/` (registry, dispatcher, `cli.py`), `gen_base_times.py`, `tests/`, `notebooks/`. |
+| `st-scrape/` | **The application.** `scrape_races.py` (scraper), `curate/` (raw→Parquet transform), `analytics/` (DuckDB views + loader), `ingestion/` (registry, dispatcher, `cli.py`), `webbuild/` (curated→SPA JSON + `digest.py`), `evaluation/` (AI meet reports: agent, S3 cache, number check), `gen_base_times.py`, `tests/`, `notebooks/`. |
 | `swimtrends-app/` | AWS **CDK infrastructure** (Python): S3, DynamoDB, dispatcher/curate Lambdas, Fargate task defs, SNS, Glue. Stacks in `swimtrends_app/*_stack.py`; tests in `tests/unit`. |
 | `docs/` | [`analytics.md`](docs/analytics.md) (querying), [`ingestion.md`](docs/ingestion.md) (operational CLI), design specs/plans under `superpowers/`. |
 | `legacy/` | Deprecated original Scrapy → PostgreSQL pipeline + Docker. Not maintained. See [`legacy/README.md`](legacy/README.md). Don't build on it. |
@@ -33,7 +33,7 @@ scrape_races.py <meet_id> <categories…>
 
 ## Environment & setup
 Two independent virtualenvs:
-- **App/tests:** `st-scrape/.venv` ← `requirements.txt` (+ `requirements-dev.txt`, `requirements-notebook.txt`). Python 3.12.
+- **App/tests:** `st-scrape/.venv` ← `requirements.txt` (+ `requirements-dev.txt`, `requirements-notebook.txt`). Python 3.12. `requirements.txt` is what both Fargate images install, so the AI-evaluation deps (`strands-agents`, `pydantic`) live in `requirements-eval.txt`, pulled in by `requirements-dev.txt`.
 - **CDK:** `swimtrends-app/.venv` ← its `requirements.txt`.
 
 AWS: profile **`swimtrends`**, region **`eu-west-1`** (account is selected by the
@@ -43,9 +43,9 @@ Scraping and AWS commands need network + credentials.
 ## Common commands (run from the dir shown)
 ```bash
 # Tests — always run before claiming done
-cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion + evaluation (218)
-cd swimtrends-app  && .venv/bin/python -m pytest tests/unit # CDK assertions
-cd web             && npm test                              # SPA unit tests
+cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion + evaluation (260)
+cd swimtrends-app  && .venv/bin/python -m pytest tests/unit # CDK assertions (40)
+cd web             && npm test                              # SPA unit tests (36)
 
 # Scrape one meet (writes db/<id>_*.jsonl locally)
 cd st-scrape && .venv/bin/python scrape_races.py 12486 DM-L DMJ-L
@@ -61,7 +61,8 @@ cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m ingestion.cli \
     query [--sql "…"] | meets [--category X] [--season Y] [--asc] | categories | summary
 
 # AI meet evaluations — dry run (reports cache hits/misses, calls no model)
-# Needs EVAL_MODEL_ID + EVAL_GUARDRAIL_ID/_VERSION; see docs/analytics.md
+# Needs only EVAL_MODEL_ID; a real run also needs EVAL_GUARDRAIL_ID/_VERSION.
+# See docs/analytics.md for how to read those two from the stack outputs.
 cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m evaluation \
     --out ../web/public/data --dry-run
 ```
@@ -86,6 +87,15 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   alerts silently stop (applies to both `SwimtrendsIngestionStack` and
   `SwimtrendsCuratedStack`). A new SNS confirmation email is sent each time.
 - **Docker must be running** (CDK builds the scraper image + Lambda bundle assets).
+- **`SwimtrendsEvaluationStack`** (the AI-evaluation guardrail) takes **no**
+  `alert_email` — it has no SNS topic, so there is nothing to drop. What it does
+  have is the opposite trap: any policy change publishes a **new numbered
+  guardrail version**, and the batch job pins a version from the environment. So
+  after deploying it, re-read `EVAL_GUARDRAIL_ID`/`EVAL_GUARDRAIL_VERSION` from
+  the stack outputs and re-export them (commands in
+  [`docs/analytics.md`](docs/analytics.md)) — a stale export keeps serving the
+  old policy. The version is also in the cache key, so the first run afterwards
+  regenerates every meet.
 
 ## Domain conventions (curated column values)
 - **stroke** is Danish: `Fri` free, `Ryg` back, `Bryst` breast, `Fly`,
@@ -110,13 +120,22 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   (`evaluation/`, rendered collapsed on the meet page). The model sees only the
   **digest** (`webbuild/digest.py`) and **every number in the published text must
   exist in it** — enforced by `evaluation/check.py`, which is why the page tells
-  readers the numbers are checkable in the tables above. Text is cached by
-  `sha256(digest + prompt/schema version + model id)`, so bumping `PROMPT_VERSION`
-  regenerates every meet. Prose about a named swimmer is limited to results facts
-  (time, points, placement, event) — no projections, no body/health/technique, no
-  criticism, no age or schooling; juniors are minors. Enforced twice: the system
-  prompt and a Bedrock Guardrail (`SwimtrendsEvaluationStack`, four denied topics
-  + contextual grounding). See [`docs/analytics.md`](docs/analytics.md).
+  readers the numbers come from the meet's own data and are machine-checked (it
+  does *not* claim they are all rendered on the page: the digest holds a sixth
+  season and the per-stroke medians, which nothing displays). Text is cached by
+  `sha256(digest + prompt/schema version + model id + guardrail id/version +
+  max_tokens)`, so bumping `PROMPT_VERSION` — or publishing a new guardrail
+  version — regenerates every meet. Prose about a named swimmer is limited to
+  results facts (time, points, placement, event) — no projections, no
+  body/health/technique, no criticism, no age or schooling; juniors are minors.
+  Two things enforce that: `SYSTEM_PROMPT` asks for it, and the generated text is
+  put through `ApplyGuardrail` (`OutputGuard` in `evaluation/agent.py`) against
+  the `SwimtrendsEvaluationStack` guardrail — four denied topics, content
+  filters, contextual grounding — before anything is cached or written. **That
+  explicit call is the enforcement**: the guardrail attached inline to the
+  Converse call only ever assesses the input, because structured output arrives
+  inside a forced tool call rather than a text block. Don't "simplify" it away.
+  See [`docs/analytics.md`](docs/analytics.md).
 
 ## Development conventions
 - **TDD.** Write the failing test first, watch it fail, then implement. App tests
