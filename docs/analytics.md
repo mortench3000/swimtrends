@@ -146,6 +146,11 @@ offline and cached. `make web-eval` fills the cache and writes
 `web/public/data/<cat>/<meet>/evaluation.json`; `make web-refresh` runs it
 between `webbuild` and the S3 sync.
 
+This step needs `strands-agents` and `pydantic`, which live in
+`st-scrape/requirements-eval.txt` rather than `requirements.txt` — the Fargate
+images install the latter and import neither. `requirements-dev.txt` pulls the
+eval file in, so the local venv and CI already have them.
+
 ### Model choice
 
 Four candidates were compared with `evaluation/compare.py` on three meets —
@@ -159,43 +164,85 @@ earliest meet on record (no prior season history):
 | Ministral 3 8B (`mistral.ministral-3-8b-instruct`) | 1 of 3 | ~$0.0010 | fabricated figures; broken Danish |
 | Claude Sonnet 5 (`eu.anthropic.claude-sonnet-5`) | — | — | not available for this account |
 
-`EVAL_MODEL_ID` should be set to the chosen Haiku id above.
+`EVAL_MODEL_ID` should be set to the chosen Haiku id above. The `$/meet` figures
+are **model tokens only** — Bedrock Guardrails are billed separately per text
+unit, and the guardrail is now applied to the output as well as the input, so
+the real cost per generated meet is a little higher than the table says.
 
-The guardrail's contextual grounding threshold is 0.85 (raised from 0.7):
-at 0.7, the contextual grounding check did not catch a model inferring
-geographic spread from a bare club count — a claim the deterministic number
-check can't see either, since it isn't a number.
+### Guardrail
 
-Config (all three required; the guardrail values come from the
-`SwimtrendsEvaluationStack` outputs):
+`SwimtrendsEvaluationStack` defines one guardrail: four denied topics
+(`TalentProjection`, `PhysiqueAndHealth`, `PersonalCriticism`,
+`PersonalDetails`), content filters (HATE / INSULTS / SEXUAL at MEDIUM input and
+HIGH output, VIOLENCE / MISCONDUCT at MEDIUM both ways, PROMPT_ATTACK MEDIUM on
+input only), and a contextual grounding check at 0.85 grounding / 0.5 relevance.
+
+The grounding check needs the digest tagged `grounding_source` and the question
+tagged `query`, and Strands sends neither through a plain-string prompt — so
+until the report started going through an explicit `ApplyGuardrail` call
+(`evaluation/agent.py`, `OutputGuard`), **contextual grounding never ran at any
+threshold**, and the denied topics only ever assessed the input. The 0.85 value
+is therefore an untuned starting point, not a tested one: expect the first real
+batch to be the first time it can block anything. One thing it is meant to catch
+is a model inferring geographic spread from a bare club count — a claim the
+deterministic number check cannot see either, since it isn't a number.
+
+Config — a real run needs all three; `--dry-run` needs only `EVAL_MODEL_ID`
+(the guardrail check is skipped for it, since it calls no model):
 
 ```bash
 export EVAL_MODEL_ID=<bedrock model id>
-export EVAL_GUARDRAIL_ID=<guardrail id>
-export EVAL_GUARDRAIL_VERSION=<numbered version, never DRAFT>
+export EVAL_GUARDRAIL_ID=$(aws cloudformation describe-stacks \
+  --stack-name SwimtrendsEvaluationStack --profile swimtrends --region eu-west-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='GuardrailId'].OutputValue" --output text)
+export EVAL_GUARDRAIL_VERSION=$(aws cloudformation describe-stacks \
+  --stack-name SwimtrendsEvaluationStack --profile swimtrends --region eu-west-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='GuardrailVersion'].OutputValue" --output text)
 ```
+
+**Re-read both after any redeploy of the stack.** Any policy change — a
+threshold, a topic definition, a content filter — publishes a NEW numbered
+guardrail version, and a stale exported `EVAL_GUARDRAIL_VERSION` keeps pinning
+the old, weaker one with nothing to warn you. `DRAFT` is refused outright.
+
+The batch operator needs `bedrock:InvokeModel*` on the model /
+inference-profile ARN, `bedrock:ApplyGuardrail` on the guardrail ARN (required
+both to invoke a model with a guardrail and for the explicit output check), and
+`s3:GetObject`/`s3:PutObject` under `swimtrends-meet-data/evaluations/*`.
 
 Useful flags:
 
 - `--dry-run` — report cache hits and misses without calling the model.
 - `--meets DM-L/12486` — one meet (or a comma-separated list).
 - `--force` — regenerate and overwrite the cached text. This is the revoke
-  switch; the bucket is versioned, so the prior text is retained.
+  switch; the bucket is versioned, so the prior text is retained. It is also the
+  only way out of a corrupt cached object: reading one raises, which skips that
+  meet on every subsequent run until the object is regenerated or deleted.
 
-The cache key is `sha256(digest + prompt_version + schema_version + model_id)`.
-Unchanged inputs reuse the stored text verbatim — bumping `PROMPT_VERSION` or
-`SCHEMA_VERSION` in `evaluation/agent.py`, or switching models, regenerates
-every meet on the next run.
+The cache key is `sha256(digest + prompt_version + schema_version + model_id +
+guardrail_id + guardrail_version + max_tokens)`. Unchanged inputs reuse the
+stored text verbatim — bumping `PROMPT_VERSION` or `SCHEMA_VERSION` in
+`evaluation/agent.py`, switching models, or publishing a new guardrail version
+regenerates every meet on the next run.
 
 Every number in a published evaluation is checked against the digest
 (`evaluation/check.py`); a report that fails twice is dropped and the page
-renders without the section.
+renders without the section. A report that passes the number check is then put
+through `ApplyGuardrail`, and a block is likewise a drop — nothing is cached or
+written.
 
-A meet that fails during `web-eval` (digest error, a bad AI report, a
-transient S3 error) gets no `evaluation.json`; the `--delete` sync that
-follows then removes that meet's section from the live site until a later
-run succeeds — the page falls back to rendering without it, same as any
-other skip. If **every** meet fails — wrong `EVAL_MODEL_ID`, a revoked
-guardrail, expired credentials — `web-eval` exits non-zero on purpose, so
-`make` stops before the sync runs and no already-published evaluation is
-deleted.
+A meet that fails during `web-eval` (digest error, a bad AI report, a guardrail
+block, a transient S3 error) gets no `evaluation.json`: any file an earlier run
+left there is deleted, so a skip can never republish superseded text. The
+`--delete` sync then removes that meet's section from the live site until a
+later run succeeds — the page falls back to rendering without it, same as any
+other skip.
+
+If **more meets are skipped than written** — wrong `EVAL_MODEL_ID`, a revoked
+guardrail, expired credentials, throttling partway through — `web-eval` exits
+non-zero on purpose and `make` stops before the sync. A minority of skips in an
+otherwise healthy batch still exits 0, so one stubborn meet does not block every
+refresh. Note what a failed run leaves behind: the live site is untouched
+(the sync never ran), but the local `web/public/data` is now missing those
+meets' sections. Re-running restores them from the cache without calling the
+model.
