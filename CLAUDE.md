@@ -139,9 +139,14 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   Grounding is checked **one section at a time at 0.5** (four `ApplyGuardrail`
   calls per meet) with no `RELEVANCE` filter — both measured; a concatenated
   four-section report scores below any threshold a truthful report can reach, so
-  the earlier whole-report check at 0.85 blocked every meet. Known gap: the
-  `PersonalCriticism` topic does not actually fire, so only the system prompt
-  enforces that one. See [`docs/analytics.md`](docs/analytics.md).
+  the earlier whole-report check at 0.85 blocked every meet. Of the four denied
+  topics only `PersonalCriticism` and `PersonalDetails` fire as topics; talent
+  projection and physique prose is caught by grounding instead (it scores ~0.01
+  against a digest of times and points). `TalentProjection`'s definition says
+  "named individual swimmer … statistics about a meet are not in scope" for a
+  measured reason — the looser wording read as *statistical* projection and
+  blocked a real report on aggregate prose. See
+  [`docs/analytics.md`](docs/analytics.md).
 
 ## Development conventions
 - **TDD.** Write the failing test first, watch it fail, then implement. App tests

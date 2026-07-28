@@ -68,6 +68,26 @@ def test_grounding_is_the_only_contextual_filter():
     assert filters == [{"Type": "GROUNDING", "Threshold": 0.5}]
 
 
+def test_talent_projection_is_scoped_to_an_individual_and_excludes_aggregates():
+    """The original definition ("a named athlete's future performance") read as
+    statistical projection to Bedrock and blocked a real report on prose about
+    the *field*: "Elitens median var 1 procent højere end i 2025." next to
+    "Der deltog 581 svømmere fordelt på 42 øvelser." fired TalentProjection,
+    deterministically, with no named swimmer's future anywhere in the text.
+    Neither sentence fires alone — only the pair.
+
+    Measured against a scratch guardrail on all 12 sections of three real
+    reports: the old definition gave 1 false positive, this one gives 0, and
+    the violation battery (talent projection, physique, criticism, personal
+    details) is unchanged. So the definition must name an individual and put
+    meet-level statistics out of scope explicitly.
+    """
+    definition = next(t["definition"] for t in mod.DENIED_TOPICS
+                      if t["name"] == "TalentProjection")
+    assert "named individual swimmer" in definition
+    assert "not in scope" in definition
+
+
 def test_guardrail_configures_content_filters():
     """There is no such thing as content filters "at service defaults": omitting
     the block means a guardrail with no content filters at all, which is what

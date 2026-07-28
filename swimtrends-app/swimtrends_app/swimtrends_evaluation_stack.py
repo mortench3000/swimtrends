@@ -46,10 +46,16 @@ BLOCKED_INPUT_MESSAGE = "Input blocked by guardrail."
 BLOCKED_OUTPUT_MESSAGE = "Output blocked by guardrail."
 
 DENIED_TOPICS: list[dict] = [
+    # "a named athlete's future performance" read as *statistical* projection to
+    # Bedrock: an aggregate season trend next to a participation count blocked a
+    # real report, deterministically, with no swimmer's future in the text at
+    # all. Hence "named individual swimmer" and the explicit out-of-scope
+    # sentence. See test_talent_projection_is_scoped_to_an_individual_and_excludes_aggregates.
     {"name": "TalentProjection",
-     "definition": ("Predictions, projections or speculation about a named "
-                    "athlete's future performance, potential, career prospects "
-                    "or selection for teams or championships."),
+     "definition": ("Claims about a named individual swimmer's future: their "
+                    "potential, career prospects, or selection for a team. "
+                    "Statistics about a meet or about a field of swimmers are "
+                    "not in scope."),
      "examples": ["Hun er et kommende OL-emne.",
                   "Han bliver landsholdssvømmer inden for to år."]},
     {"name": "PhysiqueAndHealth",

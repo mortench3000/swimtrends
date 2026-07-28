@@ -211,11 +211,22 @@ equally. The `query` block stays in the request even so, because
 `ApplyGuardrail` rejects the call with a `ValidationException` when a grounding
 policy is configured and the query is absent.
 
-One caveat found while measuring: the `PersonalCriticism` topic **does not
-fire**. Blatant criticism of a named swimmer passes the guardrail untouched
-(the INSULTS content filter does not catch it either, at HIGH output strength).
-The other three topics were probed and do fire. The system prompt is the only
-thing enforcing that rule today.
+What the four denied topics actually catch, probed against the deployed
+guardrail: `PersonalCriticism` and `PersonalDetails` fire as topics.
+`TalentProjection` and `PhysiqueAndHealth` do **not** — but both probes were
+blocked anyway, on grounding, at 0.04 and 0.01: prose of that kind is
+ungrounded in a digest of times and points, which is the whole point of the
+grounding check. Topic detection is also context-sensitive, so probe a full
+section, never a single sentence.
+
+`TalentProjection`'s definition had to be rewritten once. Worded as
+"projections about a named athlete's future performance", Bedrock read it
+*statistically* and blocked a real report on prose about the field — an
+aggregate season trend beside a participation count, no swimmer's future
+anywhere in it. Neither sentence fires alone; only the pair. The current
+definition names an individual and puts meet statistics out of scope
+explicitly, which took the false positives across 12 real sections from 1 to 0
+without changing what the violation battery catches.
 
 Config — all three are required in every mode, `--dry-run` included, because the
 guardrail's identity is part of the cache key: without it a dry run computes a key

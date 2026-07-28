@@ -275,11 +275,24 @@ version — never `DRAFT`**:
 > `ValidationException` when a contextual grounding policy is configured and the
 > query is absent.
 >
-> One gap found while measuring, deliberately left for a later guardrail
-> version: **`PersonalCriticism` does not fire.** Blatant criticism of a named
-> swimmer passes untouched, and the `INSULTS` content filter at HIGH output
-> strength does not catch it either. The other three topics were probed and do
-> fire. The system prompt's rule 3 is the only thing enforcing that one today.
+> **Corrected during implementation: `TalentProjection`'s definition.** With
+> grounding fixed, one real report was still blocked — by `TalentProjection`,
+> on prose about the *field*: an aggregate season trend ("elitens median var 1
+> procent højere end i 2025") beside a participation count. No swimmer's future
+> appeared in the text, and neither sentence fires alone; only the pair, and
+> deterministically. Worded as "projections about a named athlete's future
+> performance", Bedrock read the topic *statistically*. The definition now names
+> an individual and puts meet statistics out of scope in so many words, which
+> took false positives across the 12 sections of three real reports from 1 to 0
+> with the violation battery unchanged.
+>
+> Which topics fire at all is worth recording, since it is not what the design
+> assumed: only `PersonalCriticism` and `PersonalDetails` are detected as
+> topics. Talent-projection and physique prose is not — it is blocked by the
+> grounding check instead, scoring 0.04 and 0.01, because speculation of that
+> kind is by construction absent from a digest of times and points. Topic
+> detection is context-sensitive, so a single sentence is not a valid probe;
+> score a whole section.
 
 A guardrail block on either call is a failure, not a fallback: the meet is
 skipped and nothing is written to the cache.
