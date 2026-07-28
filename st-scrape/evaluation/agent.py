@@ -43,6 +43,7 @@ HEADINGS = (
 # Extend as models are added; unmapped ids fall back to the raw id.
 MODEL_LABELS: dict[str, str] = {
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0": "Claude Haiku 4.5",
+    "eu.anthropic.claude-sonnet-4-6": "Claude Sonnet 4.6",
 }
 
 SYSTEM_PROMPT = f"""\

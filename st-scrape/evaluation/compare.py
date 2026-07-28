@@ -16,6 +16,7 @@ residency), one Nova and one Mistral as cheap controls, both confirmed present
 directly in the eu-west-1 foundation-model list:
 
     eu.anthropic.claude-sonnet-5                 $2.20/MTok in, $11.00/MTok out
+    eu.anthropic.claude-sonnet-4-6               $3.30/MTok in, $16.50/MTok out
     eu.anthropic.claude-haiku-4-5-20251001-v1:0  $1.10/MTok in, $5.50/MTok out
     eu.amazon.nova-2-lite-v1:0                   $0.374/MTok in, $3.157/MTok out
     mistral.ministral-3-8b-instruct              $0.18/MTok in, $0.18/MTok out
@@ -33,6 +34,13 @@ the offer file:
 `-cross-region-global`, matching how the `eu.` regional profile is invoked
 here and how the other three candidates were chosen).
 
+Sonnet 4.6 added 2026-07-28 at the user's request, for a head-to-head against
+Haiku 4.5 after Sonnet 5 failed its Converse probe on this account. Access
+pre-verified two ways before the round: ACTIVE in `list-inference-profiles`
+*and* a 1-token `converse` call that succeeded (the check Sonnet 5 failed).
+Price is exactly 3x Haiku, so ~$0.021 vs ~$0.007 per meet — immaterial at 37
+meets; quality decides.
+
 Account-level model access (a candidate can still fail its first Converse call
 with AccessDeniedException even though it is listed here) is NOT verified by
 this comment block — that only happens when the harness is actually run.
@@ -46,6 +54,8 @@ import sys
 import time
 from pathlib import Path
 
+import boto3
+
 from analytics.loader import connect
 from evaluation import agent as ag
 from evaluation.cache import canonical_json
@@ -55,6 +65,7 @@ from webbuild import digest as dg
 # model_id -> (input $/MTok, output $/MTok), from the comment block above.
 PRICES: dict[str, tuple[float, float]] = {
     "eu.anthropic.claude-sonnet-5": (2.20, 11.00),
+    "eu.anthropic.claude-sonnet-4-6": (3.30, 16.50),
     "eu.anthropic.claude-haiku-4-5-20251001-v1:0": (1.10, 5.50),
     "eu.amazon.nova-2-lite-v1:0": (0.374, 3.157),
     "mistral.ministral-3-8b-instruct": (0.18, 0.18),
@@ -95,7 +106,7 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
     swims wastes a call on nothing, so that's caught and skipped here too,
     before any agent is built — same guard as evaluation/__main__.py's run()."""
     t0 = time.monotonic()
-    error, sections, offenders = None, [], set()
+    error, sections, offenders, guard = None, [], set(), None
     tin, tout, usage_ok = 0, 0, False
     try:
         digest = dg.build(con, category, meet_id)
@@ -108,8 +119,15 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
                            structured_output_model=ag.MeetEvaluation)
             sections = [{"heading": s.heading, "body": s.body}
                         for s in result.structured_output.sections]
-            offenders = check_numbers("\n".join(s["body"] for s in sections), digest)
+            text = "\n".join(s["body"] for s in sections)
+            offenders = check_numbers(text, digest)
             tin, tout, usage_ok = _usage(result)
+            # Report the guardrail verdict, don't enforce it: comparing
+            # candidates means seeing what they actually produce, and a
+            # blocked report is a fact about the candidate worth reading
+            # next to its prose. The publishing path enforces (OutputGuard).
+            guard = _guard_verdict(text, canonical_json(digest),
+                                   guardrail_id, guardrail_version)
     except Exception as e:                      # a candidate that errors is a result
         error = f"{type(e).__name__}: {e}"
     return {
@@ -118,7 +136,24 @@ def run_one(con, category, meet_id, model_id, guardrail_id, guardrail_version):
         "tokens_in": tin, "tokens_out": tout, "usage_ok": usage_ok,
         "cost": _cost(model_id, tin, tout) if usage_ok else None,
         "offenders": sorted(offenders), "sections": sections, "error": error,
+        "guard": guard,
     }
+
+
+def _guard_verdict(text, digest_json, guardrail_id, guardrail_version):
+    """What the deployed guardrail says about this report: "ok", or the
+    policies that intervened (e.g. "BLOCKED: contextualGrounding"). Never
+    raises — a guardrail that errors must not lose the row's prose."""
+    try:
+        client = boto3.client("bedrock-runtime", region_name=ag.REGION)
+        guard = ag.OutputGuard(guardrail_id=guardrail_id,
+                               guardrail_version=guardrail_version, client=client)
+        guard.check(text, digest_json)
+        return "ok"
+    except ag.EvaluationError as e:
+        return f"BLOCKED: {e}"[:300]
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"[:300]
 
 
 def _cells(r):
@@ -147,14 +182,16 @@ def _html(rows) -> str:
            ".bad{color:#b00}.cols{display:flex;gap:1.5rem;align-items:flex-start}",
            ".col{flex:1;min-width:0}</style>",
            f"<p>prompt_version={html.escape(ag.PROMPT_VERSION)}</p>",
-           "<table><tr><th>meet<th>model<th>numbers<th>in<th>out<th>$<th>s</tr>"]
+           "<table><tr><th>meet<th>model<th>numbers<th>guard<th>in<th>out<th>$<th>s</tr>"]
     for r in rows:
-        bad = "bad" if (r["offenders"] or r["error"] or not r["usage_ok"]) else ""
+        bad = "bad" if (r["offenders"] or r["error"] or not r["usage_ok"]
+                        or (r["guard"] not in (None, "ok"))) else ""
         verdict = r["error"] or (", ".join(r["offenders"]) if r["offenders"] else "ok")
         tin, tout, cost = _cells(r)
         out.append(
             f"<tr class='{bad}'><td>{html.escape(r['category'])}/{html.escape(r['meet_id'])}"
             f"<td>{html.escape(r['model_id'])}<td>{html.escape(verdict)}"
+            f"<td>{html.escape('-' if r['guard'] is None else r['guard'])}"
             f"<td>{tin}<td>{tout}<td>{cost}<td>{r['seconds']}</tr>")
     out.append("</table>")
 
@@ -203,11 +240,13 @@ def main(argv=None):
                                 guardrail_id, guardrail_version))
         args.out.write_text(_html(rows), encoding="utf-8")
 
-    print(f"\n{'model':40} {'numbers':10} {'in':>7} {'out':>7} {'$/meet':>9} {'s':>6}")
+    print(f"\n{'model':40} {'numbers':10} {'guard':>8} {'in':>7} {'out':>7} {'$/meet':>9} {'s':>6}")
     for r in rows:
         verdict = "ERROR" if r["error"] else ("FAIL" if r["offenders"] else "ok")
         tin, tout, cost = _cells(r)
-        print(f"{r['model_id'][:40]:40} {verdict:10} {tin!s:>7} "
+        guard = "-" if r["guard"] is None else (
+            "ok" if r["guard"] == "ok" else "BLOCK")
+        print(f"{r['model_id'][:40]:40} {verdict:10} {guard:>8} {tin!s:>7} "
               f"{tout!s:>7} {cost:>9} {r['seconds']:>6}")
     print(f"\nwrote {args.out}")
     return 0
