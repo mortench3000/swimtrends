@@ -15,6 +15,7 @@ PROMPT_VERSION / SCHEMA_VERSION are part of the cache key: bump either and
 every meet regenerates on the next run. Do that deliberately.
 """
 import logging
+from typing import Literal
 
 from pydantic import BaseModel, field_validator
 from strands import Agent
@@ -26,7 +27,7 @@ from evaluation.check import check_numbers
 log = logging.getLogger("evaluation")
 
 PROMPT_VERSION = "6"
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 REGION = "eu-west-1"
 MAX_TOKENS = 1200
@@ -119,15 +120,15 @@ class EvaluationError(Exception):
 
 
 class Section(BaseModel):
-    heading: str
+    # A Literal, not a str with a validator: this puts the four legal strings in
+    # the tool schema the model reads *before* it answers, and pydantic's own
+    # rejection message lists them. With only a validator, one misspelled heading
+    # ("Fremhævede svømminger") sent Haiku into 105 tool calls on a single meet —
+    # it could see that its heading was rejected but never what the alternatives
+    # were, and concluded the tool "accepts a limited set of predefined headings"
+    # it had not been told.
+    heading: Literal[HEADINGS]
     body: str
-
-    @field_validator("heading")
-    @classmethod
-    def known_heading(cls, v: str) -> str:
-        if v not in HEADINGS:
-            raise ValueError(f"unknown heading: {v!r}")
-        return v
 
 
 class MeetEvaluation(BaseModel):

@@ -401,7 +401,7 @@ def test_build_agent_refuses_a_blank_guardrail_id(bad):
 # key -- the cache-determinism guarantee failing silently, which is the only way
 # it can fail. Update these hashes in the same commit as the version bump.
 SYSTEM_PROMPT_SHA256 = "27f9a19b6b6d76d2b77d8dedd7d56b1296272adecbd69b3901de48b89d8889d7"
-SCHEMA_SHA256 = "a0e4c564478c9aac65094b12e4c485eac0b38417037673131caff49653763923"
+SCHEMA_SHA256 = "31b40e853ab846b431f7cc1d0b160efe6310a3acaaf6239dd33295bdf848736f"
 
 
 def test_system_prompt_is_pinned_to_prompt_version():
@@ -424,3 +424,29 @@ def test_output_schema_is_pinned_to_schema_version():
 
 def test_model_label_falls_back_to_the_id():
     assert ag.model_label("something-unmapped") == "something-unmapped"
+
+
+def test_the_output_schema_enumerates_the_allowed_headings():
+    """The heading must be a schema enum, not a post-hoc validator.
+
+    Measured on the first full-set run: Haiku misspelled one heading
+    ("Fremhævede svømminger" for "svømninger"), the validator rejected it, and
+    strands re-called the tool 105 times on that single meet before the model
+    gave up and asked "could you please verify the exact heading format the
+    MeetEvaluation tool accepts". It could not see the answer: `unknown heading:
+    'X'` names the offender and not the alternatives. That runaway loop
+    contributed to exhausting the account's daily token quota, which stalled the
+    rest of the batch. An enum puts the four legal strings in the tool schema the
+    model reads before it writes anything.
+    """
+    schema = ag.MeetEvaluation.model_json_schema()
+    section = schema["$defs"]["Section"]["properties"]["heading"]
+    assert section.get("enum") == list(ag.HEADINGS)
+
+
+def test_a_bad_heading_error_names_the_allowed_headings():
+    """The model's only feedback channel is the validation message."""
+    with pytest.raises(Exception) as e:
+        ag.Section(heading="Fremhævede svømminger", body="x")
+    for heading in ag.HEADINGS:
+        assert heading in str(e.value)
