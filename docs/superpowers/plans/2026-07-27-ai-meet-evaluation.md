@@ -10,6 +10,27 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-27-ai-meet-evaluation-design.md`
 
+## As shipped — deltas from this plan
+
+The plan below is left as written, so read the task bodies as the plan of record
+and this block as the diff. Where they disagree, this block and the code win.
+The spec has been brought fully in line; see it for the reasoning.
+
+| Plan says | As shipped |
+| --- | --- |
+| `GROUNDING_THRESHOLD = 0.7` (Global Constraints, Task 7's test and stack) | **0.85** grounding / 0.5 relevance. Both live in `swimtrends_evaluation_stack.py` module constants. |
+| Three denied topics | **Four** — `PersonalDetails` added, because age/school/personal detail about a minor tripped none of the first three. Plus an explicit `content_policy_config`: HATE/INSULTS/SEXUAL at MEDIUM in / HIGH out, VIOLENCE/MISCONDUCT MEDIUM both ways, PROMPT_ATTACK MEDIUM input-only. |
+| Guardrail applied inline on the Converse call | Inline **and** explicitly. Inline only ever assesses the input (structured output is a forced tool call, so the prose never appears in a text block, and the grounding qualifiers cannot be sent). The published text goes through `ApplyGuardrail` (`OutputGuard`) with the digest tagged `grounding_source` and a fixed Danish instruction tagged `query`. That call is the enforcement. |
+| Version description embeds the grounding threshold | Embeds `policy=<sha256[:12]>` over the **whole** policy — topics, content filters, both thresholds, both blocked messages. A description that tracked only the threshold would let a topic or filter change fail to publish a new version. |
+| `PROMPT_VERSION = "1"` | **`"5"`** — four prompt iterations against real reports (`SCHEMA_VERSION` is still `"1"`). Both are pinned by a hash test, so an edit that forgets the bump fails the suite. |
+| Cache key = `digest + prompt/schema version + model id` | Also `guardrail_id`, `guardrail_version` and `max_tokens`. A tightened guardrail must regenerate, not republish. |
+| `cache_prompt="default"` on the agent | Removed: deprecated in strands 1.50, and `SYSTEM_PROMPT` is below the minimum cacheable prompt length, so it could never have produced a hit. |
+| Model chosen by Task 9 | **Claude Haiku 4.5** (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`). |
+| Footer copy verbatim, "Alle tal kan efterprøves i tabellerne ovenfor" | "Alle tal stammer fra stævnets egne data og er maskinelt kontrolleret." The digest carries a sixth season and per-stroke medians the page does not render, so the original claim was false as shipped. The `· AI-genereret, eksperimentelt` summary suffix is unchanged. |
+| `written == 0` exit floor | Proportional: exits non-zero when `skipped > written`, and every skip path deletes that meet's stale `evaluation.json`. |
+| `strands-agents`/`pydantic` in `requirements.txt` | Moved to `requirements-eval.txt`, pulled in by `requirements-dev.txt` — both Fargate images install `requirements.txt` and import neither. |
+| Per-task test counts (Task 1's "164 before this task", etc.) | The `164` baseline was correct at `23e9044`. Final counts after the fix waves: **st-scrape 260, swimtrends-app 40, web 36.** |
+
 ## Global Constraints
 
 Every task's requirements implicitly include this section.
