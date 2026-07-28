@@ -141,8 +141,9 @@
       {/each}
       <p class="muted fine">
         Denne vurdering er automatisk genereret af en sprogmodel ud fra stævnets tal.
-        Den er eksperimentel og en fortolkning — ikke fakta. Alle tal kan efterprøves
-        i tabellerne ovenfor. Genereret {evaluation.generated_at} · {evaluation.model_label}
+        Den er eksperimentel og en fortolkning — ikke fakta. Alle tal stammer fra
+        stævnets egne data og er maskinelt kontrolleret.
+        Genereret {evaluation.generated_at} · {evaluation.model_label}
       </p>
     </details>
   {/if}

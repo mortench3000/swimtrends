@@ -96,7 +96,20 @@ test('Meet renders the coach evaluation with its disclaimers', async () => {
   expect(screen.getByText(/AI-genereret, eksperimentelt/)).toBeInTheDocument()
   expect(screen.getByRole('heading', { level: 4, name: 'Samlet niveau' })).toBeInTheDocument()
   expect(screen.getByText(/ikke fakta/)).toBeInTheDocument()
+  expect(screen.getByText(/maskinelt kontrolleret/)).toBeInTheDocument()
   expect(screen.getByText(/Testmodel/)).toBeInTheDocument()
+})
+
+// The digest carries numbers the page does not render (a sixth season of
+// history, the per-stroke medians and deltas), so the footer must not promise
+// that every number can be looked up in the tables above.
+test('the coach footer does not claim the numbers are checkable on the page', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(evaluationJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByText(/Trænerens vurdering/)
+  expect(screen.queryByText(/efterprøves i tabellerne/)).toBeNull()
 })
 
 test('Meet renders nothing when there is no evaluation', async () => {
