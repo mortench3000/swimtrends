@@ -362,6 +362,49 @@ def test_main_exits_nonzero_when_meets_were_found_but_nothing_was_written(
     assert rc == 1
 
 
+def test_main_exits_nonzero_when_more_meets_were_skipped_than_written(
+        tmp_path, monkeypatch):
+    """written == 0 was the only floor, so throttling that starts partway
+    through the batch (written=5, skipped=32) exited 0 and the --delete sync
+    proceeded -- publishing five sections and removing the rest. Make the guard
+    proportional: more skips than writes is a systemic failure, not routine."""
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A))
+    monkeypatch.setattr(cli, "connect", lambda: con)
+    monkeypatch.setattr(cli.ag, "evaluate",
+                        lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
+    monkeypatch.setenv("EVAL_GUARDRAIL_ID", "gr-1")
+    monkeypatch.setenv("EVAL_GUARDRAIL_VERSION", "3")
+
+    # MEET_A hits the cache and is written; the five older meets all fail.
+    rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
+
+    assert rc == 1
+
+
+def test_main_exits_zero_when_a_single_meet_is_skipped_in_a_healthy_batch(
+        tmp_path, monkeypatch):
+    """The other side of the proportional guard: routine per-meet skips must
+    still exit 0, or a single stubborn meet would block every refresh."""
+    con = digest_con()
+    client = _bucket()
+    for meet_id in ("D2026", "D2025", "D2024", "D2023", "D2022"):
+        _, key = _key(con, CATEGORY, meet_id)
+        cache.put(client, CATEGORY, meet_id, key, _cached_payload(CATEGORY, meet_id))
+    monkeypatch.setattr(cli, "connect", lambda: con)
+    monkeypatch.setattr(cli.ag, "evaluate",
+                        lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
+    monkeypatch.setenv("EVAL_GUARDRAIL_ID", "gr-1")
+    monkeypatch.setenv("EVAL_GUARDRAIL_VERSION", "3")
+
+    # five cache hits, only D2021 fails
+    rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
+
+    assert rc == 0
+
+
 def test_main_exits_zero_when_dry_run_finds_nothing_to_generate(tmp_path, monkeypatch):
     """--dry-run is exempt: a zero-written dry run is its normal, successful
     report (it never writes by design), not the systemic-failure case the

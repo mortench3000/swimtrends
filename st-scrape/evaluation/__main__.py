@@ -188,13 +188,16 @@ def main(argv=None):
                 meets=meets, force=args.force, dry_run=args.dry_run)
     print("evaluations: " + ", ".join(f"{k}={v}" for k, v in stats.items()))
 
-    # A systemic failure (bad model id, revoked guardrail, expired creds) must
-    # not exit 0: web-refresh syncs with --delete right after this, and a
-    # silent 0/0 would delete every previously published evaluation from the
-    # site. Routine per-meet skips with a nonempty result still exit 0. A
-    # --dry-run never writes by design (it only reports hits/misses), so it is
-    # exempt — its zero-written outcome is expected, not a failure.
-    if not args.dry_run and stats["total"] > 0 and stats["written"] == 0:
+    # A systemic failure (bad model id, revoked guardrail, expired creds,
+    # throttling that starts partway through) must not exit 0: web-refresh syncs
+    # with --delete right after this, so every skipped meet loses its published
+    # section. The guard is proportional rather than a zero-floor, because
+    # throttling from meet 5 onwards gives written=5, skipped=32 — which is a
+    # systemic failure wearing the shape of routine skips. A minority of skips
+    # in an otherwise healthy batch still exits 0, or one stubborn meet would
+    # block every refresh. A --dry-run never writes by design (it only reports
+    # hits/misses), so it is exempt — its zero-written outcome is expected.
+    if not args.dry_run and stats["total"] > 0 and stats["skipped"] > stats["written"]:
         return 1
     return 0
 

@@ -1,0 +1,9 @@
+# AI meet evaluations only (evaluation/, webbuild/digest.py). Deliberately NOT
+# in requirements.txt: that file is installed by both Fargate images
+# (Dockerfile, Dockerfile.curate), and neither the scraper nor curate imports
+# strands — they would pay for the whole Strands dependency tree, and a
+# fast-moving SDK in the production scraper's runtime closure churns ECS task
+# definitions on every deploy. Pulled in by requirements-dev.txt, so CI and the
+# local venv still get it.
+strands-agents>=1.50,<2
+pydantic>=2

@@ -21,8 +21,15 @@ web-deploy:
 	aws s3 sync web/dist s3://$(WEB_BUCKET)/ --delete --exclude "data/*" $(AWS_PROFILE_FLAG)
 	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) --paths "/*" $(AWS_PROFILE_FLAG)
 
-# Regenerate the data JSON from the curated zone, add AI evaluations, and push
+# Regenerate the data JSON from the curated zone, add AI evaluations, and push.
+# The EVAL_* preconditions are checked up front: webbuild takes ~50 minutes and
+# web-eval would otherwise be the first thing to notice an un-exported shell,
+# losing the whole rebuild. web-eval must stay immediately before the
+# `--delete` sync so its non-zero exit still stops the publish.
 web-refresh:
+	@: $${EVAL_MODEL_ID:?set EVAL_MODEL_ID (see docs/analytics.md)}
+	@: $${EVAL_GUARDRAIL_ID:?set EVAL_GUARDRAIL_ID (SwimtrendsEvaluationStack output)}
+	@: $${EVAL_GUARDRAIL_VERSION:?set EVAL_GUARDRAIL_VERSION (numbered, never DRAFT)}
 	cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m webbuild --out ../web/public/data
 	$(MAKE) web-eval
 	aws s3 sync web/public/data s3://$(WEB_BUCKET)/data/ --delete --profile swimtrends
