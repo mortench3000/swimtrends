@@ -48,6 +48,22 @@ def _parse_meets(spec: str) -> list[tuple[str, str]]:
     return out
 
 
+def _drop_stale(out: Path, category: str, meet_id: str) -> None:
+    """Remove this meet's evaluation.json when the meet is skipped.
+
+    webbuild does not clear its output directory and nothing else deletes from
+    it, so on a reused web/public/data a skip would otherwise keep the file an
+    *earlier* run wrote -- and the `aws s3 sync --delete` that follows
+    republishes it, pairing text from an older digest (possibly an older
+    prompt) with a page rebuilt from current data. Dropping it is what
+    docs/analytics.md already documents: a meet that fails gets no
+    evaluation.json, so the sync removes its section from the live site. A
+    transient failure therefore costs the section until the next run, which is
+    the cheap direction of the trade.
+    """
+    (out / category / meet_id / "evaluation.json").unlink(missing_ok=True)
+
+
 def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: str,
         meets=None, force: bool = False, dry_run: bool = False) -> dict:
     s3 = boto3.client("s3", region_name=ag.REGION)
@@ -76,6 +92,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
             except Exception:
                 log.exception("digest failed for %s/%s", category, meet_id)
                 stats["skipped"] += 1
+                _drop_stale(out, category, meet_id)
                 continue
 
             # A bogus or not-yet-curated meet id doesn't make dg.build raise
@@ -85,6 +102,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 log.warning("empty digest for %s/%s (no scored swims) -- skipping",
                             category, meet_id)
                 stats["skipped"] += 1
+                _drop_stale(out, category, meet_id)
                 continue
 
             key = cache.cache_key(digest, prompt_version=ag.PROMPT_VERSION,
@@ -105,6 +123,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 except Exception:
                     log.exception("evaluation failed for %s/%s", category, meet_id)
                     stats["skipped"] += 1
+                    _drop_stale(out, category, meet_id)
                     continue
                 payload = {
                     "category": category, "meet_id": meet_id,
@@ -122,6 +141,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
         except Exception:
             log.exception("evaluation pipeline failed for %s/%s", category, meet_id)
             stats["skipped"] += 1
+            _drop_stale(out, category, meet_id)
 
     return stats
 

@@ -169,6 +169,60 @@ def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
     assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
 
 
+def test_a_skip_removes_a_stale_evaluation_from_an_earlier_run(tmp_path, monkeypatch):
+    """The Critical: nothing in the pipeline ever *deleted* an evaluation.json,
+    and webbuild doesn't clear its output directory, so on a reused
+    web/public/data a skipped meet kept the file an EARLIER run wrote -- and
+    the `aws s3 sync --delete` that follows published it. That republishes text
+    written against a different digest (and a different prompt version) under a
+    page footer promising the numbers are checkable in the tables above.
+    docs/analytics.md already documents the opposite; run() must match it."""
+    con = digest_con()
+    _bucket()
+    stale = tmp_path / CATEGORY / MEET_A / "evaluation.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps(_cached_payload(CATEGORY, MEET_A, "forældet tekst")))
+
+    def _boom(*a, **k):
+        raise ag.EvaluationError("numbers not in digest")
+    monkeypatch.setattr(cli.ag, "evaluate", _boom)
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert not stale.exists()
+
+
+@pytest.mark.parametrize("break_at", ["digest", "empty", "evaluate", "write"])
+def test_every_skip_path_removes_a_stale_evaluation(tmp_path, monkeypatch, break_at):
+    """All four skip paths, not just the evaluate one: the digest-failure
+    except, the empty-digest guard, the evaluate-failure except, and the outer
+    per-meet catch-all. A stale file surviving any one of them is enough to
+    republish superseded text."""
+    con = digest_con()
+    _bucket()
+    meet_id = "NOPE" if break_at == "empty" else MEET_A
+    stale = tmp_path / CATEGORY / meet_id / "evaluation.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps(_cached_payload(CATEGORY, meet_id, "forældet tekst")))
+
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+    if break_at == "digest":
+        monkeypatch.setattr(cli.dg, "build", _boom)
+    elif break_at == "evaluate":
+        monkeypatch.setattr(cli.ag, "evaluate", _boom)
+    elif break_at == "write":
+        # stands in for the outer catch-all: a transient S3 error on cache.get
+        monkeypatch.setattr(cli.cache, "get", _boom)
+        monkeypatch.setattr(cli.ag, "evaluate", _boom)
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, meet_id)], **KWARGS)
+
+    assert stats["skipped"] == 1 and stats["written"] == 0
+    assert not stale.exists()
+
+
 def test_a_guardrail_blocked_response_writes_nothing_to_the_cache(
         tmp_path, monkeypatch, caplog):
     """The spec's own requirement: "A guardrail block is a failure, not a
