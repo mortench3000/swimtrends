@@ -122,45 +122,16 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   The parser accepts `len(cells) >= 6` and maps a non-numeric rank to `-1`;
   curate excludes `rank == -1` from scoring. Don't reintroduce a `== 6` check.
 - **AI evaluations**: meet pages can carry a batch-generated Danish coach report
-  (`evaluation/`, rendered collapsed on the meet page). The model sees only the
-  **digest** (`webbuild/digest.py`) and **every number in the published text must
-  exist in it** — enforced by `evaluation/check.py`, which is why the page tells
-  readers the numbers come from the meet's own data and are machine-checked (it
-  does *not* claim they are all rendered on the page: the digest holds a sixth
-  season and the per-stroke medians, which nothing displays). Text is cached by
-  `sha256(digest + prompt/schema version + model id + guardrail id/version +
-  max_tokens)`, so bumping `PROMPT_VERSION` — or publishing a new guardrail
-  version — regenerates every meet. Prose about a named swimmer is limited to
-  results facts (time, points, placement, event) — no projections, no
-  body/health/technique, no criticism, no age or schooling; juniors are minors.
-  Two things enforce that: `SYSTEM_PROMPT` asks for it, and the generated text is
-  put through `ApplyGuardrail` (`OutputGuard` in `evaluation/agent.py`) against
-  the `SwimtrendsEvaluationStack` guardrail — four denied topics, content
-  filters, contextual grounding — before anything is cached or written. **That
-  explicit call is the enforcement**: the guardrail attached inline to the
-  Converse call only ever assesses the input, because structured output arrives
-  inside a forced tool call rather than a text block. Don't "simplify" it away.
-  Grounding is checked **one section at a time at 0.5** (four `ApplyGuardrail`
-  calls per meet) with no `RELEVANCE` filter — both measured; a concatenated
-  four-section report scores below any threshold a truthful report can reach, so
-  the earlier whole-report check at 0.85 blocked every meet. Of the four denied
-  topics only `PersonalCriticism` and `PersonalDetails` fire as topics; talent
-  projection and physique prose is caught by grounding instead (it scores ~0.01
-  against a digest of times and points). `TalentProjection`'s definition says
-  "named individual swimmer … statistics about a meet are not in scope" for a
-  measured reason — the looser wording read as *statistical* projection and
-  blocked a real report on aggregate prose. A block is **retried** like a
-  fabricated number (the rewrite prompt names the section and the offence),
-  because what fails in practice is the model, not the policy: causal prose rule
-  6 already forbids. **Cost has a hard ceiling**: `LIMITS` (`agent.py`) caps every
-  invocation at 6 turns / 40k total tokens, because a rejected structured-output
-  field makes Strands re-call the tool with the whole conversation *plus every
-  prior rejection* resent — one misspelled heading cost 105 calls and ~1.4M input
-  tokens on a single meet, ~$31 across that day's batch. `limits` is
-  per-invocation, so an `agent(...)` call without it is an uncapped meet; a trip
-  raises and is *not* retried. The run summary reports `input_tokens`/
-  `output_tokens` for the same reason — `generated=25, skipped=16` read as
-  healthy. See [`docs/analytics.md`](docs/analytics.md).
+  (`evaluation/`). The model sees only the **digest** (`webbuild/digest.py`) and
+  every number in the published text must exist in it (`evaluation/check.py`).
+  Prose about a named swimmer is limited to results facts; juniors are minors.
+  Four things are load-bearing and were each measured — **read
+  [`docs/analytics.md`](docs/analytics.md) before touching `evaluation/`**:
+  the explicit `ApplyGuardrail` call (`OutputGuard`) is the enforcement, not the
+  guardrail on the Converse call; grounding runs **per section at 0.5**, not
+  whole-report; `limits=LIMITS` must be passed on **every** `agent(...)` call
+  (per-invocation, and an uncapped meet once cost ~$31); the cache key includes
+  the prompt/schema version and guardrail version.
 
 ## Development conventions
 - **TDD.** Write the failing test first, watch it fail, then implement. App tests
