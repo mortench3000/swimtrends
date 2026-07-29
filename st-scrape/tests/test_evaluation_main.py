@@ -8,6 +8,7 @@ never real — build_agent and evaluate are monkeypatched per test so no test
 can reach Bedrock.
 """
 import json
+import logging
 
 import boto3
 import pytest
@@ -199,6 +200,47 @@ def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
     assert stats == _counts(1, 0, 0, 1, 0)
     assert cache.get(client, CATEGORY, MEET_A, key) == good
     assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
+
+
+def test_main_quiets_the_third_party_loggers_but_not_our_own(tmp_path, monkeypatch,
+                                                            guardrail_env):
+    """botocore logs "Found credentials in shared credentials file" per client and
+    strands logs "Creating Strands MetricsClient" -- INFO noise from libraries,
+    above the per-meet lines an operator actually reads. Our own logger stays at
+    INFO or the run reports nothing."""
+    monkeypatch.setattr(cli, "run", lambda *a, **k: dict.fromkeys(
+        ("total", "hit", "generated", "skipped", "written",
+         "input_tokens", "output_tokens"), 0))
+    monkeypatch.setattr(cli, "connect", lambda: None)
+    cli.main(["--out", str(tmp_path), "--model", "m", "--dry-run"])
+
+    assert logging.getLogger("botocore").level >= logging.WARNING
+    assert logging.getLogger("strands").level >= logging.WARNING
+    assert logging.getLogger("evaluation").getEffectiveLevel() <= logging.INFO
+
+
+def test_a_refusal_logs_one_line_but_an_unexpected_crash_keeps_its_traceback(
+        tmp_path, monkeypatch, caplog):
+    """An EvaluationError is the policy working (a fabricated number, a blocked
+    section), not the code breaking -- a 6-frame traceback per refused meet reads
+    as a crash and buries the reason. Anything else is a real bug and keeps the
+    traceback, or a batch-wide breakage becomes undiagnosable."""
+    con = digest_con()
+    _bucket()
+
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: (_ for _ in ()).throw(
+        ag.EvaluationError("the guardrail blocked the section 'Bredde' after 1 retry")))
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert f"the guardrail blocked the section 'Bredde'" in caplog.text
+    assert "Traceback" not in caplog.text
+
+    caplog.clear()
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("boto exploded")))
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert "Traceback" in caplog.text
 
 
 def test_a_skip_removes_a_stale_evaluation_from_an_earlier_run(tmp_path, monkeypatch):

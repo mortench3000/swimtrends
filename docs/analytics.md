@@ -232,6 +232,16 @@ Config — all three are required in every mode, `--dry-run` included, because t
 guardrail's identity is part of the cache key: without it a dry run computes a key
 no real run stores under and reports every meet as a miss.
 
+**Via make, there is nothing to export.** `make web-eval` / `web-refresh` /
+`eval-models` set all three themselves: the model id is a literal in the
+`Makefile` and the guardrail id/version are read live from the deployed
+`SwimtrendsEvaluationStack` outputs on every run. That is deliberate — a policy
+change publishes a NEW numbered guardrail version, and a *stale export* would
+keep pinning the old, weaker one with nothing to warn you. They are `?=`, so an
+export still wins when you want one (pinning an older version to compare).
+
+Running the module directly needs them in the environment:
+
 ```bash
 export EVAL_MODEL_ID=<bedrock model id>
 export EVAL_GUARDRAIL_ID=$(aws cloudformation describe-stacks \
@@ -242,10 +252,17 @@ export EVAL_GUARDRAIL_VERSION=$(aws cloudformation describe-stacks \
   --query "Stacks[0].Outputs[?OutputKey=='GuardrailVersion'].OutputValue" --output text)
 ```
 
-**Re-read both after any redeploy of the stack.** Any policy change — a
-threshold, a topic definition, a content filter — publishes a NEW numbered
-guardrail version, and a stale exported `EVAL_GUARDRAIL_VERSION` keeps pinning
-the old, weaker one with nothing to warn you. `DRAFT` is refused outright.
+**Re-read both after any redeploy of the stack** if you export them by hand.
+`DRAFT` is refused outright.
+
+Two other traps the make targets handle, both of which cost a run to diagnose:
+the eval deps (`strands-agents`, `pydantic`) are in `requirements-eval.txt`, not
+`requirements.txt`, so a venv built from the latter alone dies at import — the
+`eval-preflight` target checks the import up front. And exported
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_SESSION_TOKEN` **outrank**
+`AWS_PROFILE` in both the boto and DuckDB credential chains, so a shell holding
+another account's credentials gets 403 on the curated zone; the `ST_PYTHON`
+wrapper in the `Makefile` unsets all three.
 
 The batch operator needs `bedrock:InvokeModel*` on the model /
 inference-profile ARN, `bedrock:ApplyGuardrail` on the guardrail ARN (required
@@ -290,6 +307,35 @@ left there is deleted, so a skip can never republish superseded text. The
 `--delete` sync then removes that meet's section from the live site until a
 later run succeeds — the page falls back to rendering without it, same as any
 other skip.
+
+What a refused meet looks like — one INFO per blocked section, one WARNING for
+the meet:
+
+```
+INFO    the guardrail blocked the section 'Bredde': GROUNDING 0.3 < threshold 0.5
+WARNING refused DM-L/6980: the guardrail blocked the section 'Bredde' after 1 retry
+ERROR   evaluation failed for DM-L/6980   ← + traceback
+```
+
+A `refused` **warning** is the policy working — the model wrote a number that
+isn't in the digest, or a section the guardrail rejected, twice. Nothing is
+wrong with the run; that meet just has no report. An **ERROR with a traceback**
+is a real bug or an infrastructure failure and is worth chasing. A refusal
+deliberately prints no traceback: six frames per refused meet across 40 meets
+reads as a crash and buries the one line that says which section and why.
+
+The score is the useful part of a grounding block: `0.13` is prose the digest
+cannot support at all, `0.49` a near miss on the 0.5 threshold. The full
+`ApplyGuardrail` assessment is ~700 characters of `invocationMetrics`, coverage
+counts and the guardrail ARN — it goes to DEBUG (`log.setLevel(logging.DEBUG)`)
+rather than to the batch output, and is where to look if a policy fires that the
+one-line summary doesn't name.
+
+The batch also silences two INFO sources that are not batch signals: Strands'
+streamed `Tool #17: MeetEvaluation` chatter and the model's own mid-retry text
+(`callback_handler=None` in `build_agent`), and botocore's
+`Found credentials in shared credentials file` per client (`botocore`, `boto3`,
+`strands` pinned to WARNING in `__main__`). A real library error still prints.
 
 ### Cost, and the ceiling on it
 

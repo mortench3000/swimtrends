@@ -147,6 +147,15 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
             else:
                 try:
                     sections = ag.evaluate(digest, agent=agent, guard=guard)
+                except ag.EvaluationError as e:
+                    # A refusal is the policy working, not the code breaking:
+                    # the message already names the offending section or number.
+                    # One line, no traceback -- six frames per refused meet read
+                    # as a crash and bury the reason across a 40-meet batch.
+                    log.warning("refused %s/%s: %s", category, meet_id, e)
+                    stats["skipped"] += 1
+                    _drop_stale(out, category, meet_id, dry_run=dry_run)
+                    continue
                 except Exception:
                     log.exception("evaluation failed for %s/%s", category, meet_id)
                     stats["skipped"] += 1
@@ -188,6 +197,15 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # Library INFO chatter ("Found credentials in shared credentials file" per
+    # client, "Creating Strands MetricsClient") sits above the per-meet lines an
+    # operator reads. Only these two, and only to WARNING: a real boto or strands
+    # problem still prints.
+    for name in ("botocore", "boto3", "strands"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    # Explicit, not inherited: basicConfig is a no-op once anything else has
+    # configured the root logger, and then the per-meet lines would go missing.
+    log.setLevel(logging.INFO)
 
     if not args.model:
         raise SystemExit("no model: pass --model or set EVAL_MODEL_ID")
