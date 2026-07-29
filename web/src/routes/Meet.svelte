@@ -1,6 +1,6 @@
 <script>
   import { onMount } from 'svelte'
-  import { getMeet, getRaces } from '../lib/dataClient.js'
+  import { getMeet, getRaces, getEvaluation } from '../lib/dataClient.js'
   import { href } from '../router.js'
   import { formatInt, formatPoints, formatTimeStr, formatDelta } from '../lib/format.js'
   import { filterRaces, disciplineOptions, genderOptions } from '../lib/raceFilter.js'
@@ -14,6 +14,7 @@
   let meet = $state(null)
   const jr = $derived(meet?.junior_scoped === true)
   let races = $state(null)
+  let evaluation = $state(null)
   let loading = $state(true)
   let err = $state(null)
 
@@ -33,12 +34,14 @@
     loading = true
     err = null
     try {
-      const [m, r] = await Promise.all([
+      const [m, r, e] = await Promise.all([
         getMeet(params.cat, params.meetId),
         getRaces(params.cat, params.meetId),
+        getEvaluation(params.cat, params.meetId),
       ])
       meet = m
       races = r.races
+      evaluation = e
     } catch (e) {
       err = e
     } finally {
@@ -128,6 +131,22 @@
       format={formatInt}
     />
   </div>
+
+  {#if evaluation}
+    <details class="coach">
+      <summary>Trænerens vurdering <span class="muted">· AI-genereret, eksperimentelt</span></summary>
+      {#each evaluation.sections as s (s.heading)}
+        <h4>{s.heading}</h4>
+        <p>{s.body}</p>
+      {/each}
+      <p class="muted fine">
+        Denne vurdering er automatisk genereret af en sprogmodel ud fra stævnets tal.
+        Den er eksperimentel og en fortolkning — ikke fakta. Alle tal stammer fra
+        stævnets egne data og er maskinelt kontrolleret.
+        Genereret {evaluation.generated_at} · {evaluation.model_label}
+      </p>
+    </details>
+  {/if}
 
   <div class="race-head">
     <h3 class="section-title">Løb</h3>
@@ -220,6 +239,29 @@
     grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
     gap: var(--space-3);
     margin-bottom: var(--space-5);
+  }
+
+  .coach {
+    margin: 1.5rem 0;
+  }
+
+  .coach summary {
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .coach h4 {
+    margin: 1rem 0 0.25rem;
+  }
+
+  .coach p {
+    margin: 0;
+  }
+
+  .coach .fine {
+    margin-top: 1rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
   }
 
   .section-title {

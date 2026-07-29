@@ -4,6 +4,7 @@ import aws_cdk as cdk
 
 from swimtrends_app.swimtrends_app_stack import SwimtrendsAppStack
 from swimtrends_app.swimtrends_curated_stack import SwimtrendsCuratedStack
+from swimtrends_app.swimtrends_evaluation_stack import SwimtrendsEvaluationStack
 from swimtrends_app.swimtrends_ingestion_stack import SwimtrendsIngestionStack
 from swimtrends_app.swimtrends_cert_stack import SwimtrendsCertStack
 from swimtrends_app.swimtrends_web_stack import SwimtrendsWebStack
@@ -26,6 +27,8 @@ SwimtrendsCuratedStack(
     alert_email=app.node.try_get_context("alert_email"),
     env=ENV,
 )
+
+SwimtrendsEvaluationStack(app, "SwimtrendsEvaluationStack", env=ENV)
 
 cert_stack = SwimtrendsCertStack(
     app, "SwimtrendsCertStack", env=ENV_US, cross_region_references=True)

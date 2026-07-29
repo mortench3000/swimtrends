@@ -138,3 +138,197 @@ individual swims only).
 - New meets are queryable the moment they are curated — no refresh step.
 - `category` (DM-L, DMJ-L, …) is meet-level; a meet in two categories pools into
   both in the field-evolution views.
+
+## AI meet evaluations
+
+Each meet page can carry a short Danish coach-style evaluation, generated
+offline and cached. `make web-eval` fills the cache and writes
+`web/public/data/<cat>/<meet>/evaluation.json`; `make web-refresh` runs it
+between `webbuild` and the S3 sync.
+
+This step needs `strands-agents` and `pydantic`, which live in
+`st-scrape/requirements-eval.txt` rather than `requirements.txt` — the Fargate
+images install the latter and import neither. `requirements-dev.txt` pulls the
+eval file in, so the local venv and CI already have them.
+
+### Model choice
+
+Four candidates were compared with `evaluation/compare.py` on three meets —
+a large senior LCM championship, the same meet junior-scoped, and the
+earliest meet on record (no prior season history):
+
+| model | numbers | $/meet | note |
+|---|---|---|---|
+| Claude Haiku 4.5 (`eu.anthropic.claude-haiku-4-5-20251001-v1:0`) | ok ×3 | ~$0.0069 | **chosen** — the only candidate with a genuine coach voice |
+| Nova 2 Lite (`eu.amazon.nova-2-lite-v1:0`) | ok ×3 | ~$0.0021 | accurate but reads like a narrated table |
+| Ministral 3 8B (`mistral.ministral-3-8b-instruct`) | 1 of 3 | ~$0.0010 | fabricated figures; broken Danish |
+| Claude Sonnet 5 (`eu.anthropic.claude-sonnet-5`) | — | — | not available for this account |
+
+`EVAL_MODEL_ID` should be set to the chosen Haiku id above. The `$/meet` figures
+are **model tokens only** — Bedrock Guardrails are billed separately per text
+unit, and the guardrail is now applied to the output as well as the input, so
+the real cost per generated meet is a little higher than the table says.
+
+### Guardrail
+
+`SwimtrendsEvaluationStack` defines one guardrail: four denied topics
+(`TalentProjection`, `PhysiqueAndHealth`, `PersonalCriticism`,
+`PersonalDetails`), content filters (HATE / INSULTS / SEXUAL at MEDIUM input and
+HIGH output, VIOLENCE / MISCONDUCT at MEDIUM both ways, PROMPT_ATTACK MEDIUM on
+input only), and a contextual grounding check at 0.5 — `GROUNDING` only, no
+`RELEVANCE` filter.
+
+The grounding check needs the digest tagged `grounding_source` and the question
+tagged `query`, and Strands sends neither through a plain-string prompt — so
+until the report started going through an explicit `ApplyGuardrail` call
+(`evaluation/agent.py`, `OutputGuard`), **contextual grounding never ran at any
+threshold**, and the denied topics only ever assessed the input. What it catches
+is something like a model inferring geographic spread from a bare club count — a
+claim the deterministic number check cannot see either, since it isn't a number.
+
+The threshold and the shape of the check are measured, not guessed, and the two
+are inseparable — **the report is checked one section at a time**, four
+`ApplyGuardrail` calls per generated meet:
+
+| what was scored | grounding score |
+| --- | --- |
+| six real reports, whole report as one block | 0.40 – 0.81 |
+| those same reports, section by section | 0.63 – 0.95 |
+| deliberately ungrounded sections (invented number, causal claim, inferred geography, talent projection) | 0.00 – 0.34 |
+| a plain recitation of digest facts | 0.97 |
+
+Concatenating four sections depresses the score below anything a truthful report
+reaches, so the original whole-report check at 0.85 blocked 100% of real reports;
+per section, 0.5 sits in the middle of a wide gap. A block names the offending
+section. **Raising the threshold without re-measuring per section will block
+every meet.**
+
+`RELEVANCE` was removed rather than lowered: it carries no signal here. The
+physique-violation probe scored 0.70 relevance — higher than the *honest*
+"Discipliner i bevægelse" section at 0.36. With one generic query for every meet
+it measures "does this text answer the question", which every section does about
+equally. The `query` block stays in the request even so, because
+`ApplyGuardrail` rejects the call with a `ValidationException` when a grounding
+policy is configured and the query is absent.
+
+What the four denied topics actually catch, probed against the deployed
+guardrail: `PersonalCriticism` and `PersonalDetails` fire as topics.
+`TalentProjection` and `PhysiqueAndHealth` do **not** — but both probes were
+blocked anyway, on grounding, at 0.04 and 0.01: prose of that kind is
+ungrounded in a digest of times and points, which is the whole point of the
+grounding check. Topic detection is also context-sensitive, so probe a full
+section, never a single sentence.
+
+`TalentProjection`'s definition had to be rewritten once. Worded as
+"projections about a named athlete's future performance", Bedrock read it
+*statistically* and blocked a real report on prose about the field — an
+aggregate season trend beside a participation count, no swimmer's future
+anywhere in it. Neither sentence fires alone; only the pair. The current
+definition names an individual and puts meet statistics out of scope
+explicitly, which took the false positives across 12 real sections from 1 to 0
+without changing what the violation battery catches.
+
+Config — all three are required in every mode, `--dry-run` included, because the
+guardrail's identity is part of the cache key: without it a dry run computes a key
+no real run stores under and reports every meet as a miss.
+
+```bash
+export EVAL_MODEL_ID=<bedrock model id>
+export EVAL_GUARDRAIL_ID=$(aws cloudformation describe-stacks \
+  --stack-name SwimtrendsEvaluationStack --profile swimtrends --region eu-west-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='GuardrailId'].OutputValue" --output text)
+export EVAL_GUARDRAIL_VERSION=$(aws cloudformation describe-stacks \
+  --stack-name SwimtrendsEvaluationStack --profile swimtrends --region eu-west-1 \
+  --query "Stacks[0].Outputs[?OutputKey=='GuardrailVersion'].OutputValue" --output text)
+```
+
+**Re-read both after any redeploy of the stack.** Any policy change — a
+threshold, a topic definition, a content filter — publishes a NEW numbered
+guardrail version, and a stale exported `EVAL_GUARDRAIL_VERSION` keeps pinning
+the old, weaker one with nothing to warn you. `DRAFT` is refused outright.
+
+The batch operator needs `bedrock:InvokeModel*` on the model /
+inference-profile ARN, `bedrock:ApplyGuardrail` on the guardrail ARN (required
+both to invoke a model with a guardrail and for the explicit output check), and
+`s3:GetObject`/`s3:PutObject` under `swimtrends-meet-data/evaluations/*`.
+
+Useful flags:
+
+- `--dry-run` — report cache hits and misses without calling the model. Needs the
+  same three variables as a real run (see above), and deletes nothing: it never
+  prunes a stale `evaluation.json`, since no `--delete` sync follows it.
+- `--meets DM-L/12486` — one meet (or a comma-separated list).
+- `--force` — regenerate and overwrite the cached text. This is the revoke
+  switch; the bucket is versioned, so the prior text is retained. It is also the
+  only way out of a corrupt cached object: reading one raises, which skips that
+  meet on every subsequent run until the object is regenerated or deleted.
+
+The cache key is `sha256(digest + prompt_version + schema_version + model_id +
+guardrail_id + guardrail_version + max_tokens)`. Unchanged inputs reuse the
+stored text verbatim — bumping `PROMPT_VERSION` or `SCHEMA_VERSION` in
+`evaluation/agent.py`, switching models, or publishing a new guardrail version
+regenerates every meet on the next run.
+
+Every number in a published evaluation is checked against the digest
+(`evaluation/check.py`); a report that fails twice is dropped and the page
+renders without the section. A report that passes the number check is then put
+through `ApplyGuardrail` **section by section**, and a block is retried exactly
+like a fabricated number: the rewrite prompt names the blocked section and the
+offence, and only a report that is blocked twice is dropped — nothing is cached
+or written then.
+
+The retry exists because the model, not the policy, is what fails here. On the
+first real run against a working guardrail, 2 of 3 meets were blocked, each on a
+single section carrying a causal claim ("dette skyldes …", "er således en
+væsentlig forklarende faktor") that `SYSTEM_PROMPT` rule 6 already forbids. One
+drifting section is not worth the whole meet's page section, and the same rule-6
+wording now quotes those constructions back at the model.
+
+A meet that fails during `web-eval` (digest error, a bad AI report, a guardrail
+block, a transient S3 error) gets no `evaluation.json`: any file an earlier run
+left there is deleted, so a skip can never republish superseded text. The
+`--delete` sync then removes that meet's section from the live site until a
+later run succeeds — the page falls back to rendering without it, same as any
+other skip.
+
+### Cost, and the ceiling on it
+
+A full generation of every meet can exhaust the account's **daily** Bedrock
+token quota. Observed on the first full-set run: `ThrottlingException: Too many
+tokens per day`, after which every remaining meet fails and the run appears to
+hang (the retries back off for minutes at a time). Nothing is lost — the meets
+already generated are cached, so re-running the next day resumes and pays only
+for what is left.
+
+What exhausted it was not the batch's size. A rejected structured-output field
+makes Strands re-call the tool, resending the whole conversation **plus every
+prior rejection**, so input grows per call and the total grows quadratically:
+one misspelled section heading cost **105 tool calls and ~1.4M input tokens on a
+single meet**. The day billed ~28M input tokens (**$30.87**) against an expected
+~0.2M (~$0.29) — 94% of it input, ~120× over.
+
+Three measures, each addressing a different link in that chain:
+
+| measure | where | what it stops |
+| --- | --- | --- |
+| the section heading is a schema `Literal` | `Section.heading` | the trigger: the model can read the four legal strings *before* it answers, instead of being told only that its guess was wrong |
+| `LIMITS = {"turns": 6, "total_tokens": 40_000}` on every invocation | `evaluate()` | the runaway itself — a hard per-meet ceiling ~10× a healthy meet's spend and ~35× below what the incident cost |
+| `input_tokens` / `output_tokens` in the run summary | `run()` | the blindness: `generated=25, skipped=16` read as a healthy run, and the only evidence was the bill two days later |
+
+`limits` is **per invocation, not per agent** — it cannot be set once on the
+`Agent`, so an `agent(...)` call that omits it is an uncapped meet. A trip ends
+the invocation with a `limit_*` stop reason and no structured output, which is
+indistinguishable from an empty answer unless it is named; `evaluate` raises on
+it and does **not** retry, since a trip means the meet already spent its whole
+allowance. Note what the caps do *not* do: they bound one meet, not the batch, so
+41 pathological meets would still cost 41 × 40k. The daily quota is the backstop
+there.
+
+If **more meets are skipped than written** — wrong `EVAL_MODEL_ID`, a revoked
+guardrail, expired credentials, throttling partway through — `web-eval` exits
+non-zero on purpose and `make` stops before the sync. A minority of skips in an
+otherwise healthy batch still exits 0, so one stubborn meet does not block every
+refresh. Note what a failed run leaves behind: the live site is untouched
+(the sync never ran), but the local `web/public/data` is now missing those
+meets' sections. Re-running restores them from the cache without calling the
+model.

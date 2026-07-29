@@ -23,3 +23,14 @@ test('throws on non-ok', async () => {
   mockFetch({})
   await expect(dc.getRaces('DM-L', 'NOPE')).rejects.toThrow()
 })
+
+test('getEvaluation resolves null when the file is absent', async () => {
+  mockFetch({})
+  await expect(dc.getEvaluation('DM-L', 'M2026')).resolves.toBeNull()
+})
+
+test('getEvaluation returns the payload when present', async () => {
+  mockFetch({ 'data/DM-L/M2026/evaluation.json': { sections: [] } })
+  const e = await dc.getEvaluation('DM-L', 'M2026')
+  expect(e.sections).toEqual([])
+})

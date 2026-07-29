@@ -1,0 +1,586 @@
+"""The batch CLI's run()/main(): per-meet best-effort behaviour, and the
+publication guard that stops web-refresh's --delete sync from firing on a
+systemic failure.
+
+S3 is moto (see tests/conftest.py's autouse mocked_aws); the digest comes from
+a real in-memory DuckDB (tests/evaluation_fixtures.digest_con); the agent is
+never real — build_agent and evaluate are monkeypatched per test so no test
+can reach Bedrock.
+"""
+import json
+
+import boto3
+import pytest
+from botocore.exceptions import ClientError
+
+from evaluation import __main__ as cli
+from evaluation import agent as ag
+from evaluation import cache
+from tests.evaluation_fixtures import digest_con
+from webbuild import digest as dg
+
+CATEGORY = "DM-L"
+MEET_A = "D2026"
+MEET_B = "D2025"
+MODEL_ID = "model-x"
+KWARGS = dict(model_id=MODEL_ID, guardrail_id="gr-1", guardrail_version="3")
+
+
+def _bucket():
+    client = boto3.client("s3", region_name="eu-west-1")
+    client.create_bucket(Bucket=cache.BUCKET,
+                         CreateBucketConfiguration={"LocationConstraint": "eu-west-1"})
+    return client
+
+
+def _key(con, category, meet_id):
+    digest = dg.build(con, category, meet_id)
+    return digest, cache.cache_key(
+        digest, prompt_version=ag.PROMPT_VERSION,
+        schema_version=ag.SCHEMA_VERSION, model_id=MODEL_ID,
+        guardrail_id=KWARGS["guardrail_id"],
+        guardrail_version=KWARGS["guardrail_version"], max_tokens=ag.MAX_TOKENS)
+
+
+def _cached_payload(category, meet_id, body="cached tekst"):
+    return {"category": category, "meet_id": meet_id,
+            "prompt_version": ag.PROMPT_VERSION, "schema_version": ag.SCHEMA_VERSION,
+            "model_id": MODEL_ID, "model_label": MODEL_ID,
+            "generated_at": "2026-01-01",
+            "sections": [{"heading": h, "body": body} for h in ag.HEADINGS]}
+
+
+def _counts(total, hit, generated, skipped, written):
+    """The full stats dict, for tests asserting run()'s outcome by equality.
+
+    Equality rather than per-key checks so a new counter cannot appear
+    unnoticed; the token counters default to 0 here because these tests stub
+    out the agent and spend nothing. The two token tests assert those keys
+    directly."""
+    return {"total": total, "hit": hit, "generated": generated,
+            "skipped": skipped, "written": written,
+            "input_tokens": 0, "output_tokens": 0}
+
+
+def _valid_sections(digest, body_extra=""):
+    """Sections whose only number (entrants) is licensed by the digest, so a
+    real ag.evaluate() call (with a FakeAgent) would pass check_numbers."""
+    n = digest["facts"]["entrants"]
+    return [{"heading": h, "body": f"{n} deltagere. {body_extra}"} for h in ag.HEADINGS]
+
+
+class NoopGuard:
+    """An OutputGuard that never intervenes. Replacing the real one also stops
+    any test constructing a bedrock-runtime client."""
+    def __init__(self):
+        self.checked = []
+
+    def check(self, report_text, digest_json):
+        self.checked.append(report_text)
+
+
+@pytest.fixture
+def guardrail_env(monkeypatch):
+    """The guardrail id/version main() requires -- for a --dry-run too, since
+    they are part of the cache key it has to reproduce."""
+    monkeypatch.setenv("EVAL_GUARDRAIL_ID", KWARGS["guardrail_id"])
+    monkeypatch.setenv("EVAL_GUARDRAIL_VERSION", KWARGS["guardrail_version"])
+
+
+@pytest.fixture(autouse=True)
+def no_real_agent(monkeypatch):
+    """Every test replaces build_agent; tests that reach evaluate() replace it
+    too. This fixture only stops an accidental real Bedrock construction if a
+    test forgets — evaluate itself is stubbed per-test below."""
+    monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: object())
+    monkeypatch.setattr(cli.ag, "OutputGuard", lambda **kw: NoopGuard())
+
+
+def test_cache_hit_skips_evaluate_and_writes_cached_payload_verbatim(tmp_path, monkeypatch):
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    payload = _cached_payload(CATEGORY, MEET_A)
+    cache.put(client, CATEGORY, MEET_A, key, payload)
+
+    called = []
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: called.append(1))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert not called
+    assert stats == _counts(1, 1, 0, 0, 1)
+    written = json.loads((tmp_path / CATEGORY / MEET_A / "evaluation.json").read_text())
+    assert written == payload
+
+
+def test_force_on_hit_calls_evaluate_and_overwrites_the_cache(tmp_path, monkeypatch):
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A, "gammel tekst"))
+
+    new_sections = _valid_sections(digest, "ny tekst.")
+    calls = []
+    monkeypatch.setattr(cli.ag, "evaluate", lambda d, **k: calls.append(d) or new_sections)
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], force=True, **KWARGS)
+
+    assert len(calls) == 1
+    assert stats == _counts(1, 0, 1, 0, 1)
+    stored = cache.get(client, CATEGORY, MEET_A, key)
+    assert stored["sections"] == new_sections
+
+
+def test_digest_failure_skips_the_meet_and_writes_nothing(tmp_path, monkeypatch, caplog):
+    """dg.build has to be made to raise: a bogus meet id does NOT raise, it
+    degrades to an all-zero digest, so passing one here exercised the
+    empty-digest guard instead (a duplicate of the test below) and left the
+    digest-failure except uncovered. A real digest failure is a broken view or
+    an unreadable Parquet file. The log assertion is what discriminates that
+    handler from the outer catch-all, which would otherwise absorb the raise
+    and make the same stats appear."""
+    con = digest_con()
+    _bucket()
+
+    def _boom(*a, **k):
+        raise RuntimeError("no such view: results_by_category")
+    monkeypatch.setattr(cli.dg, "build", _boom)
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
+    assert f"digest failed for {CATEGORY}/{MEET_A}" in caplog.text
+
+
+def test_empty_digest_skips_without_calling_evaluate_or_touching_the_cache(
+        tmp_path, monkeypatch):
+    """"NOPE" doesn't make dg.build raise -- it degrades to an all-zero
+    digest (facts["entrants"] == 0). Before the fix-round-2 guard, run() still
+    reached ag.evaluate() with that empty digest (and only survived because
+    the autouse fake agent isn't callable); that's a wasted model call in
+    production. The digest-level guard in run() must skip before evaluate is
+    ever invoked and before the cache is touched -- that's the assertion that
+    proves we don't spend."""
+    con = digest_con()
+    _bucket()
+
+    evaluate_calls = []
+    put_calls = []
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: evaluate_calls.append(1))
+    monkeypatch.setattr(cli.cache, "put", lambda *a, **k: put_calls.append(1))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, "NOPE")], **KWARGS)
+
+    assert not evaluate_calls
+    assert not put_calls
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert not (tmp_path / CATEGORY).exists()
+
+
+def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
+        tmp_path, monkeypatch):
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    good = _cached_payload(CATEGORY, MEET_A, "den gode tidligere tekst")
+    cache.put(client, CATEGORY, MEET_A, key, good)
+
+    def _boom(*a, **k):
+        raise ag.EvaluationError("numbers not in digest")
+    monkeypatch.setattr(cli.ag, "evaluate", _boom)
+
+    # force=True so the cache-hit branch is bypassed and evaluate is actually
+    # attempted; this is what a revoked/bad prompt version regeneration looks
+    # like in production.
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], force=True, **KWARGS)
+
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert cache.get(client, CATEGORY, MEET_A, key) == good
+    assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
+
+
+def test_a_skip_removes_a_stale_evaluation_from_an_earlier_run(tmp_path, monkeypatch):
+    """The Critical: nothing in the pipeline ever *deleted* an evaluation.json,
+    and webbuild doesn't clear its output directory, so on a reused
+    web/public/data a skipped meet kept the file an EARLIER run wrote -- and
+    the `aws s3 sync --delete` that follows published it. That republishes text
+    written against a different digest (and a different prompt version) under a
+    page footer promising the numbers are checkable in the tables above.
+    docs/analytics.md already documents the opposite; run() must match it."""
+    con = digest_con()
+    _bucket()
+    stale = tmp_path / CATEGORY / MEET_A / "evaluation.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps(_cached_payload(CATEGORY, MEET_A, "forældet tekst")))
+
+    def _boom(*a, **k):
+        raise ag.EvaluationError("numbers not in digest")
+    monkeypatch.setattr(cli.ag, "evaluate", _boom)
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert not stale.exists()
+
+
+@pytest.mark.parametrize("break_at", ["digest", "empty", "evaluate", "write"])
+def test_every_skip_path_removes_a_stale_evaluation(tmp_path, monkeypatch, break_at):
+    """All four skip paths, not just the evaluate one: the digest-failure
+    except, the empty-digest guard, the evaluate-failure except, and the outer
+    per-meet catch-all. A stale file surviving any one of them is enough to
+    republish superseded text."""
+    con = digest_con()
+    _bucket()
+    meet_id = "NOPE" if break_at == "empty" else MEET_A
+    stale = tmp_path / CATEGORY / meet_id / "evaluation.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps(_cached_payload(CATEGORY, meet_id, "forældet tekst")))
+
+    def _boom(*a, **k):
+        raise RuntimeError("boom")
+    if break_at == "digest":
+        monkeypatch.setattr(cli.dg, "build", _boom)
+    elif break_at == "evaluate":
+        monkeypatch.setattr(cli.ag, "evaluate", _boom)
+    elif break_at == "write":
+        # stands in for the outer catch-all: a transient S3 error on cache.get
+        monkeypatch.setattr(cli.cache, "get", _boom)
+        monkeypatch.setattr(cli.ag, "evaluate", _boom)
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, meet_id)], **KWARGS)
+
+    assert stats["skipped"] == 1 and stats["written"] == 0
+    assert not stale.exists()
+
+
+def test_a_guardrail_blocked_response_writes_nothing_to_the_cache(
+        tmp_path, monkeypatch, caplog):
+    """The spec's own requirement: "A guardrail block is a failure, not a
+    fallback: the meet is skipped and nothing is written to the cache." The
+    real ag.evaluate runs here (only the Strands agent is faked), so this
+    exercises the actual block detection rather than a stubbed raise — and the
+    log has to name the guardrail, not an incidental AttributeError, or a
+    systematically-blocking prompt is undiagnosable across 37 meets."""
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+
+    class BlockedAgent:
+        messages = []
+
+        def __call__(self, prompt, **kwargs):
+            class Blocked:
+                stop_reason = "guardrail_intervened"
+                structured_output = None
+            return Blocked()
+
+    monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: BlockedAgent())
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert cache.get(client, CATEGORY, MEET_A, key) is None
+    assert not (tmp_path / CATEGORY).exists()
+    assert "guardrail" in caplog.text.lower()
+    assert "AttributeError" not in caplog.text
+
+
+def test_an_output_guardrail_block_writes_nothing_to_the_cache(tmp_path, monkeypatch):
+    """The other half: the report passed the number check, so the deterministic
+    gate is happy, and ApplyGuardrail on the assembled text is the only thing
+    left standing between the model and the published page. A block there must
+    reach the same "skip the meet, write nothing" outcome."""
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+
+    class GoodAgent:
+        messages = []
+
+        def __call__(self, prompt, **kwargs):
+            class Result:
+                stop_reason = "tool_use"
+                structured_output = ag.MeetEvaluation(
+                    sections=_valid_sections(digest))
+            return Result()
+
+    class BlockingGuard:
+        def check(self, report_text, digest_json):
+            raise ag.EvaluationError("the guardrail blocked the report: [...]")
+
+    monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: GoodAgent())
+    monkeypatch.setattr(cli.ag, "OutputGuard", lambda **kw: BlockingGuard())
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert cache.get(client, CATEGORY, MEET_A, key) is None
+    assert not (tmp_path / CATEGORY).exists()
+
+
+def test_a_cache_get_error_skips_that_meet_and_the_batch_continues(tmp_path, monkeypatch):
+    """The Critical: a transient S3 error (e.g. SlowDown) on one meet must not
+    abort meets after it. Regression test for the widened per-meet catch-all
+    in run() — see the fix-round report for the failing run against the
+    pre-fix code."""
+    con = digest_con()
+    _, key_a = _key(con, CATEGORY, MEET_A)
+    digest_b, key_b = _key(con, CATEGORY, MEET_B)
+    _bucket()
+
+    real_get = cache.get
+
+    def _flaky_get(client, category, meet_id, key):
+        if meet_id == MEET_A:
+            raise ClientError({"Error": {"Code": "SlowDown", "Message": "throttled"}},
+                              "GetObject")
+        return real_get(client, category, meet_id, key)
+    monkeypatch.setattr(cli.cache, "get", _flaky_get)
+
+    calls = []
+    monkeypatch.setattr(cli.ag, "evaluate",
+                        lambda d, **k: calls.append(d) or _valid_sections(d))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A), (CATEGORY, MEET_B)], **KWARGS)
+
+    assert stats["total"] == 2
+    assert stats["skipped"] == 1                 # MEET_A: the SlowDown
+    assert stats["generated"] == 1               # MEET_B: reached and generated
+    assert stats["written"] == 1
+    assert len(calls) == 1 and calls[0] == digest_b       # only MEET_B's evaluate ran
+    assert not (tmp_path / CATEGORY / MEET_A).exists()
+    assert (tmp_path / CATEGORY / MEET_B / "evaluation.json").exists()
+
+
+@pytest.mark.parametrize("prime_cache", [True, False], ids=["hit", "miss"])
+def test_dry_run_never_calls_evaluate_or_put(tmp_path, monkeypatch, prime_cache):
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    if prime_cache:
+        cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A))
+
+    evaluate_calls = []
+    put_calls = []
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: evaluate_calls.append(1))
+    monkeypatch.setattr(cli.cache, "put", lambda *a, **k: put_calls.append(1))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], dry_run=True, **KWARGS)
+
+    assert not evaluate_calls
+    assert not put_calls
+    if prime_cache:
+        assert stats == _counts(1, 1, 0, 0, 1)
+        assert (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
+    else:
+        assert stats == _counts(1, 0, 0, 1, 0)
+        assert not (tmp_path / CATEGORY).exists()
+
+
+@pytest.mark.parametrize("break_at", ["digest", "empty", "miss"])
+def test_a_dry_run_deletes_no_evaluation(tmp_path, monkeypatch, break_at):
+    """A dry run reports; it does not publish, and `--delete` never follows it.
+    So none of its skip paths may remove a file a real run would republish --
+    including the digest-failure path, which used to delete even under
+    --dry-run while the cache-miss path next to it did not."""
+    con = digest_con()
+    _bucket()
+    meet_id = "NOPE" if break_at == "empty" else MEET_A
+    stale = tmp_path / CATEGORY / meet_id / "evaluation.json"
+    stale.parent.mkdir(parents=True)
+    stale.write_text(json.dumps(_cached_payload(CATEGORY, meet_id, "forældet tekst")))
+    if break_at == "digest":
+        monkeypatch.setattr(cli.dg, "build",
+                            lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, meet_id)], dry_run=True, **KWARGS)
+
+    assert stats["skipped"] == 1
+    assert stale.exists()
+
+
+def test_a_dry_run_looks_up_the_same_cache_key_a_real_run_stores_under(
+        tmp_path, monkeypatch, guardrail_env):
+    """--dry-run exists to report hits and misses, so it has to compute the key
+    a real run writes. It briefly did not: main() exempted --dry-run from the
+    guardrail-env check, the None id/version went into cache_key (which is key
+    material), and every meet came back a miss in the very configuration the
+    docs recommended -- an operator reading `hit=0, skipped=37` would conclude
+    the whole set needed regenerating. Requiring the env for a dry run too keeps
+    one cache-key formula in the system; this pins the keys equal."""
+    con = digest_con()
+    client = _bucket()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A))
+    monkeypatch.setattr(cli, "connect", lambda: con)
+    monkeypatch.setenv("EVAL_MODEL_ID", MODEL_ID)
+
+    looked_up = []
+    real_get = cli.cache.get
+    monkeypatch.setattr(cli.cache, "get",
+                        lambda c, cat, mid, k: looked_up.append(k) or real_get(c, cat, mid, k))
+
+    argv = ["--out", str(tmp_path), "--meets", f"{CATEGORY}/{MEET_A}"]
+    assert cli.main(argv + ["--dry-run"]) == 0
+    assert cli.main(argv) == 0
+
+    assert looked_up == [key, key]
+
+
+def test_main_requires_the_guardrail_env_for_a_dry_run_too(tmp_path, monkeypatch):
+    """A dry run that cannot compute the real key cannot report hits, which is
+    its whole purpose -- so refuse it rather than report misses that aren't."""
+    monkeypatch.delenv("EVAL_GUARDRAIL_ID", raising=False)
+    monkeypatch.delenv("EVAL_GUARDRAIL_VERSION", raising=False)
+
+    with pytest.raises(SystemExit, match="EVAL_GUARDRAIL_ID"):
+        cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run"])
+
+
+def test_main_exits_nonzero_when_meets_were_found_but_nothing_was_written(
+        tmp_path, monkeypatch, guardrail_env):
+    con = digest_con()
+    _bucket()
+    monkeypatch.setattr(cli, "connect", lambda: con)
+    monkeypatch.setattr(cli.ag, "evaluate",
+                        lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
+
+    rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
+
+    assert rc == 1
+
+
+def test_main_exits_nonzero_when_more_meets_were_skipped_than_written(
+        tmp_path, monkeypatch, guardrail_env):
+    """written == 0 was the only floor, so throttling that starts partway
+    through the batch (written=5, skipped=32) exited 0 and the --delete sync
+    proceeded -- publishing five sections and removing the rest. Make the guard
+    proportional: more skips than writes is a systemic failure, not routine."""
+    con = digest_con()
+    digest, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A))
+    monkeypatch.setattr(cli, "connect", lambda: con)
+    monkeypatch.setattr(cli.ag, "evaluate",
+                        lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
+
+    # MEET_A hits the cache and is written; the five older meets all fail.
+    rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
+
+    assert rc == 1
+
+
+def test_main_exits_zero_when_a_single_meet_is_skipped_in_a_healthy_batch(
+        tmp_path, monkeypatch, guardrail_env):
+    """The other side of the proportional guard: routine per-meet skips must
+    still exit 0, or a single stubborn meet would block every refresh."""
+    con = digest_con()
+    client = _bucket()
+    for meet_id in ("D2026", "D2025", "D2024", "D2023", "D2022"):
+        _, key = _key(con, CATEGORY, meet_id)
+        cache.put(client, CATEGORY, meet_id, key, _cached_payload(CATEGORY, meet_id))
+    monkeypatch.setattr(cli, "connect", lambda: con)
+    monkeypatch.setattr(cli.ag, "evaluate",
+                        lambda *a, **k: (_ for _ in ()).throw(ag.EvaluationError("boom")))
+
+    # five cache hits, only D2021 fails
+    rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID])
+
+    assert rc == 0
+
+
+def test_main_exits_zero_when_dry_run_finds_nothing_to_generate(
+        tmp_path, monkeypatch, guardrail_env):
+    """--dry-run is exempt: a zero-written dry run is its normal, successful
+    report (it never writes by design), not the systemic-failure case the
+    exit-code guard exists for."""
+    con = digest_con()
+    _bucket()
+    monkeypatch.setattr(cli, "connect", lambda: con)
+
+    rc = cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run"])
+
+    assert rc == 0
+
+
+def test_parse_meets_strips_whitespace_around_the_slash():
+    assert cli._parse_meets(" DM-L / 12486 , DO/45 ") == [("DM-L", "12486"), ("DO", "45")]
+
+
+def test_parse_meets_rejects_a_malformed_entry():
+    with pytest.raises(SystemExit):
+        cli._parse_meets("DM-L-12486")
+
+
+@pytest.mark.parametrize("spec", [",", " , ", ",,"])
+def test_main_rejects_a_meets_flag_that_parses_to_nothing(tmp_path, spec, guardrail_env):
+    """A filter that parses to zero entries used to be indistinguishable from
+    "no filter given": _parse_meets returned [], which is falsy, so run() fell
+    through to every meet in the registry. With --force that turns a typo into
+    revoking every cached text and spending the whole batch."""
+    with pytest.raises(SystemExit, match="no meets"):
+        cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run",
+                  "--meets", spec])
+
+
+def test_run_treats_an_empty_meet_list_as_empty_not_as_all_meets(tmp_path):
+    """The other half of the same defect, at the run() boundary: `meets or
+    _all_meets(con)` conflated [] with None. Only None means "no filter"."""
+    con = digest_con()
+    _bucket()
+
+    stats = cli.run(con, tmp_path, meets=[], **KWARGS)
+
+    assert stats["total"] == 0
+    assert cli.run(con, tmp_path, meets=None, dry_run=True, **KWARGS)["total"] > 0
+
+
+def test_main_rejects_an_explicitly_empty_meets_flag(tmp_path, guardrail_env):
+    # The empty --meets check must happen before any DuckDB/S3 call, so
+    # --dry-run with the env satisfied still reaches it.
+    with pytest.raises(SystemExit, match="empty"):
+        cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run", "--meets", ""])
+
+
+def test_run_reports_the_tokens_it_spent(tmp_path, monkeypatch):
+    """The batch that ran away had no accounting at all.
+
+    compare.py — a hand-run harness that cannot loop — reports tokens and cost
+    per model, while the unattended nightly batch reported neither. So the day a
+    rejected field sent one meet into 105 tool calls, the only evidence was the
+    AWS bill two days later: `generated=25, skipped=16` looked like a healthy
+    run. Tokens are what is billed, so tokens are what the summary has to name.
+    """
+    con = digest_con()
+    _bucket()
+
+    class UsedTokens:
+        """A Strands AgentResult's accumulated usage, per meet."""
+        event_loop_metrics = type("M", (), {
+            "accumulated_usage": {"inputTokens": 3000, "outputTokens": 700,
+                                  "totalTokens": 3700}})()
+
+    monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: UsedTokens())
+    monkeypatch.setattr(cli.ag, "evaluate", lambda d, **k: _valid_sections(d))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats["input_tokens"] == 3000
+    assert stats["output_tokens"] == 700
+
+
+def test_run_reports_zero_tokens_on_an_all_cached_batch(tmp_path, monkeypatch):
+    """A cache hit calls no model, so a run of hits must read as free. The
+    counters come off the agent, which a --dry-run never builds — so they have to
+    survive an agent of None rather than crash the batch that spends nothing."""
+    con = digest_con()
+    _, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], dry_run=True, **KWARGS)
+
+    assert stats["input_tokens"] == 0
+    assert stats["output_tokens"] == 0

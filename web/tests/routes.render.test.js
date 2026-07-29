@@ -7,6 +7,7 @@ import meetJson from './fixtures/meet.json'
 import racesJson from './fixtures/races.json'
 import filterRacesJson from './fixtures/races.filter.json'
 import raceJson from './fixtures/race.json'
+import evaluationJson from './fixtures/evaluation.json'
 
 beforeEach(() => { dc._resetCache() })
 
@@ -22,6 +23,7 @@ const juniorMeet = {
 test('junior-scoped meet hides the redundant Juniorer tile', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(juniorMeet)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
   render(Meet, { params: { cat: 'DMJ-L', meetId: 'C2026' } })
   await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: 'Combined Champs 2026' })).toBeInTheDocument())
   expect(screen.queryByText('Juniorer')).toBeNull()
@@ -31,6 +33,7 @@ test('junior-scoped meet hides the redundant Juniorer tile', async () => {
 test('ordinary meet still shows the Juniorer tile', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: meetJson.meet_name })).toBeInTheDocument())
   expect(screen.getByText('Juniorer')).toBeInTheDocument()
@@ -39,6 +42,7 @@ test('ordinary meet still shows the Juniorer tile', async () => {
 test('Meet renders facts and a race link', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: meetJson.meet_name })).toBeInTheDocument())
   expect(screen.getByRole('heading', { level: 3, name: /løb/i })).toBeInTheDocument()
@@ -47,6 +51,7 @@ test('Meet renders facts and a race link', async () => {
 test('Meet shows a Stafet chip only when the meet has relays', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(filterRacesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await screen.findByRole('button', { name: 'Stafet' })
   expect(screen.getByRole('button', { name: 'Bryst' })).toBeInTheDocument()
@@ -55,6 +60,7 @@ test('Meet shows a Stafet chip only when the meet has relays', async () => {
 test('Meet has no Stafet chip when there are no relays', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson) // 2 individual races, no relay
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await screen.findByRole('button', { name: 'Fri' }) // racesJson has an individual Fri race
   expect(screen.queryByRole('button', { name: 'Stafet' })).toBeNull()
@@ -63,6 +69,7 @@ test('Meet has no Stafet chip when there are no relays', async () => {
 test('clicking Bryst narrows the list to bryst individual races', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(filterRacesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await fireEvent.click(await screen.findByRole('button', { name: 'Bryst' }))
   expect(screen.getByRole('link', { name: /Kvinder 200m Bryst/ })).toBeInTheDocument()
@@ -73,10 +80,54 @@ test('clicking Bryst narrows the list to bryst individual races', async () => {
 test('clicking Stafet shows the relay and hides individual races', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(filterRacesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await fireEvent.click(await screen.findByRole('button', { name: 'Stafet' }))
   expect(screen.getByRole('link', { name: /Mix 4x100m HM/ })).toBeInTheDocument()
   expect(screen.queryByRole('link', { name: /Mænd 100m Fri/ })).toBeNull()
+})
+
+test('Meet renders the coach evaluation with its disclaimers', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(evaluationJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByText(/Trænerens vurdering/)
+  expect(screen.getByText(/AI-genereret, eksperimentelt/)).toBeInTheDocument()
+  expect(screen.getByRole('heading', { level: 4, name: 'Samlet niveau' })).toBeInTheDocument()
+  expect(screen.getByText(/ikke fakta/)).toBeInTheDocument()
+  expect(screen.getByText(/maskinelt kontrolleret/)).toBeInTheDocument()
+  expect(screen.getByText(/Testmodel/)).toBeInTheDocument()
+})
+
+// The digest carries numbers the page does not render (a sixth season of
+// history, the per-stroke medians and deltas), so the footer must not promise
+// that every number can be looked up in the tables above.
+test('the coach footer does not claim the numbers are checkable on the page', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(evaluationJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByText(/Trænerens vurdering/)
+  expect(screen.queryByText(/efterprøves i tabellerne/)).toBeNull()
+})
+
+test('Meet renders nothing when there is no evaluation', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await waitFor(() => expect(screen.getByRole('heading', { level: 2, name: meetJson.meet_name })).toBeInTheDocument())
+  expect(screen.queryByText(/Trænerens vurdering/)).toBeNull()
+})
+
+test('the evaluation section starts collapsed', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(evaluationJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  const summary = await screen.findByText(/Trænerens vurdering/)
+  expect(summary.closest('details').open).toBe(false)
 })
 
 test('Race renders podium winner and winning time', async () => {

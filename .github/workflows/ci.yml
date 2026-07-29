@@ -36,6 +36,18 @@ jobs:
         run: python -m pytest -q
         working-directory: st-scrape
 
+      # A separate venv: swimtrends-app pins aws-cdk-lib, which st-scrape does
+      # not install. Assertion tests only — they synth templates in-process and
+      # touch no AWS. Nothing here deploys a stack: every CDK stack in this repo
+      # is deployed by hand, because the deploy needs `-c alert_email` passed on
+      # the command line (see CLAUDE.md).
+      - name: CDK assertion tests
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt -r requirements-dev.txt
+          .venv/bin/python -m pytest tests/unit -q
+        working-directory: swimtrends-app
+
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
