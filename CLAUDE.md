@@ -60,10 +60,14 @@ cd st-scrape && .venv/bin/python -m ingestion.cli register|dispatch|curate|class
 cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m ingestion.cli \
     query [--sql "…"] | meets [--category X] [--season Y] [--asc] | categories | summary
 
-# AI meet evaluations — dry run (reports cache hits/misses, calls no model)
-# Needs EVAL_MODEL_ID + EVAL_GUARDRAIL_ID/_VERSION in every mode — the guardrail
-# is in the cache key, so without it a dry run reports every meet as a miss.
-# See docs/analytics.md for how to read those two from the stack outputs.
+# AI meet evaluations. `make web-eval` (from the repo root) needs no exports —
+# it resolves the model id + live guardrail version itself, unsets any inherited
+# AWS_* keys, and checks the eval deps first. Run the module directly only for
+# flags make doesn't pass, e.g. --dry-run (cache hits/misses, calls no model) —
+# and then EVAL_MODEL_ID + EVAL_GUARDRAIL_ID/_VERSION are required in *every*
+# mode: the guardrail is in the cache key, so without them a dry run reports
+# every meet as a miss. See docs/analytics.md for the exports.
+make web-eval
 cd st-scrape && AWS_PROFILE=swimtrends .venv/bin/python -m evaluation \
     --out ../web/public/data --dry-run
 ```
