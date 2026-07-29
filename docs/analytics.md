@@ -308,6 +308,20 @@ left there is deleted, so a skip can never republish superseded text. The
 later run succeeds — the page falls back to rendering without it, same as any
 other skip.
 
+Two log shapes, and the difference matters when reading a batch:
+
+```
+WARNING refused DMJ-K/9779: the guardrail blocked the section 'Bredde' after 1 retry
+ERROR   evaluation failed for DMJ-K/9779   ← + traceback
+```
+
+A `refused` **warning** is the policy working — the model wrote a number that
+isn't in the digest, or a section the guardrail rejected, twice. Nothing is
+wrong with the run; that meet just has no report. An **ERROR with a traceback**
+is a real bug or an infrastructure failure and is worth chasing. A refusal
+deliberately prints no traceback: six frames per refused meet across 40 meets
+reads as a crash and buries the one line that says which section and why.
+
 ### Cost, and the ceiling on it
 
 A full generation of every meet can exhaust the account's **daily** Bedrock

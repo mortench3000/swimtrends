@@ -147,6 +147,15 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
             else:
                 try:
                     sections = ag.evaluate(digest, agent=agent, guard=guard)
+                except ag.EvaluationError as e:
+                    # A refusal is the policy working, not the code breaking:
+                    # the message already names the offending section or number.
+                    # One line, no traceback -- six frames per refused meet read
+                    # as a crash and bury the reason across a 40-meet batch.
+                    log.warning("refused %s/%s: %s", category, meet_id, e)
+                    stats["skipped"] += 1
+                    _drop_stale(out, category, meet_id, dry_run=dry_run)
+                    continue
                 except Exception:
                     log.exception("evaluation failed for %s/%s", category, meet_id)
                     stats["skipped"] += 1

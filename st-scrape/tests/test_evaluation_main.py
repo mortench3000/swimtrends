@@ -201,6 +201,30 @@ def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
     assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
 
 
+def test_a_refusal_logs_one_line_but_an_unexpected_crash_keeps_its_traceback(
+        tmp_path, monkeypatch, caplog):
+    """An EvaluationError is the policy working (a fabricated number, a blocked
+    section), not the code breaking -- a 6-frame traceback per refused meet reads
+    as a crash and buries the reason. Anything else is a real bug and keeps the
+    traceback, or a batch-wide breakage becomes undiagnosable."""
+    con = digest_con()
+    _bucket()
+
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: (_ for _ in ()).throw(
+        ag.EvaluationError("the guardrail blocked the section 'Bredde' after 1 retry")))
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert f"the guardrail blocked the section 'Bredde'" in caplog.text
+    assert "Traceback" not in caplog.text
+
+    caplog.clear()
+    monkeypatch.setattr(cli.ag, "evaluate", lambda *a, **k: (_ for _ in ()).throw(
+        RuntimeError("boto exploded")))
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+    assert stats == _counts(1, 0, 0, 1, 0)
+    assert "Traceback" in caplog.text
+
+
 def test_a_skip_removes_a_stale_evaluation_from_an_earlier_run(tmp_path, monkeypatch):
     """The Critical: nothing in the pipeline ever *deleted* an evaluation.json,
     and webbuild doesn't clear its output directory, so on a reused
