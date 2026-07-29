@@ -14,9 +14,16 @@ overrides, `pending` — see [ingestion.md](ingestion.md).
 ## Interactive REPL
 ```bash
 cd st-scrape
-swimtrends query
+.venv/bin/python -m ingestion.cli query
 ```
 `con` is the DuckDB connection; `sql("…")` prints a result. All views are loaded.
+
+There is no `swimtrends` console script in this repo, so **`swimtrends` below is
+shorthand for `.venv/bin/python -m ingestion.cli`**, run from `st-scrape/`. Alias
+it if you want the short form to work verbatim:
+```bash
+alias swimtrends='.venv/bin/python -m ingestion.cli'
+```
 
 One-shot (how fast you had to swim to make the 200 breaststroke final at DM-L,
 per season):
@@ -122,6 +129,14 @@ Output mirrors the app's URL layout (index.json, <category>/meets.json,
   cut-line (`entrants >= n`) from a thin field. An event swum as a *timed final*
   (no heats — common for small fields) has no prelim, so it is **absent** from
   these views entirely; use `event_standard_by_season` for an unbroken trend.
+- **Relays:** `relay_results` (relay swims only, DQs excluded),
+  `relay_results_by_category`, `relay_event_standard_by_season`. Relays are swum
+  as timed finals, so there is no relay cut-line view. `relay_count` is part of
+  the event key so different relay sizes stay distinct (every curated relay is
+  currently a 4x). `gender` is `M`/`F` in the data so far, though `X` (mixed) is
+  a legal value. Columns mirror `event_standard_by_season` minus the cut-line
+  ones: `swims`, `best_cs`, `median_cs`, `top8_avg_cs` — note `median_cs`, not
+  the individual view's `top3_avg_cs`.
 
 Base views: `results` (1 row per result, with
 `age`/`is_junior`/`phase`/`is_relay`/`is_dq`) and `individual_results` (real
