@@ -8,6 +8,7 @@ never real — build_agent and evaluate are monkeypatched per test so no test
 can reach Bedrock.
 """
 import json
+import logging
 
 import boto3
 import pytest
@@ -199,6 +200,23 @@ def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
     assert stats == _counts(1, 0, 0, 1, 0)
     assert cache.get(client, CATEGORY, MEET_A, key) == good
     assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
+
+
+def test_main_quiets_the_third_party_loggers_but_not_our_own(tmp_path, monkeypatch,
+                                                            guardrail_env):
+    """botocore logs "Found credentials in shared credentials file" per client and
+    strands logs "Creating Strands MetricsClient" -- INFO noise from libraries,
+    above the per-meet lines an operator actually reads. Our own logger stays at
+    INFO or the run reports nothing."""
+    monkeypatch.setattr(cli, "run", lambda *a, **k: dict.fromkeys(
+        ("total", "hit", "generated", "skipped", "written",
+         "input_tokens", "output_tokens"), 0))
+    monkeypatch.setattr(cli, "connect", lambda: None)
+    cli.main(["--out", str(tmp_path), "--model", "m", "--dry-run"])
+
+    assert logging.getLogger("botocore").level >= logging.WARNING
+    assert logging.getLogger("strands").level >= logging.WARNING
+    assert logging.getLogger("evaluation").getEffectiveLevel() <= logging.INFO
 
 
 def test_a_refusal_logs_one_line_but_an_unexpected_crash_keeps_its_traceback(

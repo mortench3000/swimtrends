@@ -197,6 +197,15 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    # Library INFO chatter ("Found credentials in shared credentials file" per
+    # client, "Creating Strands MetricsClient") sits above the per-meet lines an
+    # operator reads. Only these two, and only to WARNING: a real boto or strands
+    # problem still prints.
+    for name in ("botocore", "boto3", "strands"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    # Explicit, not inherited: basicConfig is a no-op once anything else has
+    # configured the root logger, and then the per-meet lines would go missing.
+    log.setLevel(logging.INFO)
 
     if not args.model:
         raise SystemExit("no model: pass --model or set EVAL_MODEL_ID")

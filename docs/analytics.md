@@ -308,11 +308,13 @@ left there is deleted, so a skip can never republish superseded text. The
 later run succeeds — the page falls back to rendering without it, same as any
 other skip.
 
-Two log shapes, and the difference matters when reading a batch:
+What a refused meet looks like — one INFO per blocked section, one WARNING for
+the meet:
 
 ```
-WARNING refused DMJ-K/9779: the guardrail blocked the section 'Bredde' after 1 retry
-ERROR   evaluation failed for DMJ-K/9779   ← + traceback
+INFO    the guardrail blocked the section 'Bredde': GROUNDING 0.3 < threshold 0.5
+WARNING refused DM-L/6980: the guardrail blocked the section 'Bredde' after 1 retry
+ERROR   evaluation failed for DM-L/6980   ← + traceback
 ```
 
 A `refused` **warning** is the policy working — the model wrote a number that
@@ -321,6 +323,19 @@ wrong with the run; that meet just has no report. An **ERROR with a traceback**
 is a real bug or an infrastructure failure and is worth chasing. A refusal
 deliberately prints no traceback: six frames per refused meet across 40 meets
 reads as a crash and buries the one line that says which section and why.
+
+The score is the useful part of a grounding block: `0.13` is prose the digest
+cannot support at all, `0.49` a near miss on the 0.5 threshold. The full
+`ApplyGuardrail` assessment is ~700 characters of `invocationMetrics`, coverage
+counts and the guardrail ARN — it goes to DEBUG (`log.setLevel(logging.DEBUG)`)
+rather than to the batch output, and is where to look if a policy fires that the
+one-line summary doesn't name.
+
+The batch also silences two INFO sources that are not batch signals: Strands'
+streamed `Tool #17: MeetEvaluation` chatter and the model's own mid-retry text
+(`callback_handler=None` in `build_agent`), and botocore's
+`Found credentials in shared credentials file` per client (`botocore`, `boto3`,
+`strands` pinned to WARNING in `__main__`). A real library error still prints.
 
 ### Cost, and the ceiling on it
 

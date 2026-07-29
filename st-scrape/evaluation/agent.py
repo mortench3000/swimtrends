@@ -195,7 +195,37 @@ def build_agent(*, model_id: str, guardrail_id: str, guardrail_version: str) -> 
         guardrail_version=guardrail_version,
         max_tokens=MAX_TOKENS,
     )
-    return Agent(model=model, system_prompt=SYSTEM_PROMPT)
+    # callback_handler=None: the default PrintingCallbackHandler streams every
+    # tool call ("Tool #17: MeetEvaluation") and every text block to stdout,
+    # including the model's mid-retry apologies to itself. Across a 41-meet batch
+    # that is most of the output and none of it is a signal — the per-meet
+    # refused/failed lines and the closing summary are.
+    return Agent(model=model, system_prompt=SYSTEM_PROMPT, callback_handler=None)
+
+
+def _why(assessments) -> str:
+    """The reasons an ApplyGuardrail response intervened, one short line.
+
+    The raw assessments dict is ~700 characters of invocationMetrics, coverage
+    counts and the guardrail ARN. Several blocks per meet buried the line saying
+    which meet was refused. What is actionable is the policy and, for grounding,
+    score vs threshold: 0.13 is prose the digest cannot support, 0.49 a near miss.
+    """
+    reasons = []
+    for a in assessments or []:
+        for f in a.get("contextualGroundingPolicy", {}).get("filters", []):
+            if f.get("action") == "BLOCKED":
+                reasons.append(f"{f.get('type')} {f.get('score')} "
+                               f"< threshold {f.get('threshold')}")
+        for t in a.get("topicPolicy", {}).get("topics", []) if isinstance(
+                a.get("topicPolicy"), dict) else []:
+            reasons.append(f"topic {t.get('name')}")
+        for c in a.get("contentPolicy", {}).get("filters", []) if isinstance(
+                a.get("contentPolicy"), dict) else []:
+            reasons.append(f"content {c.get('type')} {c.get('confidence')}")
+    # Nothing recognised is itself the signal: a policy fired that this summary
+    # doesn't model, and the DEBUG line beside it has the detail.
+    return "; ".join(reasons) or "see the DEBUG assessment"
 
 
 class OutputGuard:
@@ -251,8 +281,12 @@ class OutputGuard:
                     {"text": {"text": section["body"]}},   # unqualified: guard this
                 ])
             if response.get("action") == "GUARDRAIL_INTERVENED":
+                assessments = response.get("assessments")
                 log.info("the guardrail blocked the section %r: %s",
-                         section["heading"], response.get("assessments"))
+                         section["heading"], _why(assessments))
+                # The summary keeps only what the four configured policies can
+                # say; the raw dict stays reachable for anything else that fires.
+                log.debug("full assessment for %r: %s", section["heading"], assessments)
                 return section["heading"]
         return None
 

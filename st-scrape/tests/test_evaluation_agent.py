@@ -64,7 +64,8 @@ class FakeGuardrailClient:
         guarded = kwargs["content"][2]["text"]["text"]
         action = next((a for key, a in self.action_for.items() if key in guarded),
                       self.action)
-        return {"action": action, "assessments": [{"topicPolicy": "x"}]}
+        return {"action": action,
+                "assessments": getattr(self, "assessments", [{"topicPolicy": "x"}])}
 
 
 def _guard(action="NONE"):
@@ -183,6 +184,33 @@ def test_the_guard_checks_each_section_separately():
     # judged against all the facts, not only the ones it happens to quote.
     for call in guard.client.calls:
         assert "412" in call["content"][0]["text"]["text"]
+
+
+def test_a_block_logs_the_score_and_threshold_not_the_raw_assessment(caplog):
+    """The raw assessments dict is ~700 characters of invocationMetrics and ARNs
+    per block, several per meet -- it pushed the one line that says which meet was
+    refused off the screen. Score vs threshold is the whole actionable content:
+    0.13 is prose the digest cannot support, 0.49 is a near miss."""
+    client = FakeGuardrailClient()
+    client.action_for = {"tredje": "GUARDRAIL_INTERVENED"}
+    client.assessments = [{"contextualGroundingPolicy": {"filters": [
+        {"type": "GROUNDING", "threshold": 0.5, "score": 0.13,
+         "action": "BLOCKED", "detected": True}]}}]
+    guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3", client=client)
+    sections = [{"heading": h, "body": b} for h, b in
+                zip(ag.HEADINGS, ["a.", "b.", "c i tredje.", "d."])]
+
+    with caplog.at_level("DEBUG", logger="evaluation"):
+        assert guard.check(sections, "{}") == ag.HEADINGS[2]
+
+    line = next(r.getMessage() for r in caplog.records if r.levelname == "INFO")
+    assert ag.HEADINGS[2] in line and "GROUNDING" in line
+    assert "0.13" in line and "0.5" in line
+    assert "invocationMetrics" not in line            # not the raw dict
+    # Still recoverable when an unrecognised policy fires: the full assessment
+    # goes to DEBUG rather than nowhere.
+    debug = "\n".join(r.getMessage() for r in caplog.records if r.levelname == "DEBUG")
+    assert "contextualGroundingPolicy" in debug
 
 
 def test_a_block_names_the_offending_section():
@@ -348,6 +376,28 @@ def test_build_agent_wires_region_model_and_a_numbered_guardrail(monkeypatch):
     assert seen["guardrail_id"] == "gr-1"
     assert seen["guardrail_version"] == "3"
     assert seen["max_tokens"] == 1200
+
+
+def test_build_agent_silences_the_streamed_tool_and_text_chatter(monkeypatch, capsys):
+    """Strands' default callback_handler prints every tool call ("Tool #17:
+    MeetEvaluation") and every text block the model emits, including its
+    apologies to itself mid-retry. Across 41 meets that is the bulk of the
+    output and none of it is a batch signal -- the per-meet outcome lines are.
+    """
+    class RecordingModel:
+        stateful = False
+
+        def __init__(self, **kwargs):
+            pass
+
+    monkeypatch.setattr(ag, "BedrockModel", RecordingModel)
+    agent = ag.build_agent(model_id="model-x", guardrail_id="gr-1",
+                           guardrail_version="3")
+    # strands normalises callback_handler=None to its own null handler, so assert
+    # what matters: not the printing one, and it emits nothing.
+    agent.callback_handler(data="hello", complete=True,
+                           current_tool_use={"name": "MeetEvaluation"})
+    assert capsys.readouterr().out == ""
 
 
 def test_build_agent_does_not_pass_the_deprecated_cache_prompt(monkeypatch):
