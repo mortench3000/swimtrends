@@ -31,6 +31,37 @@ scrape_races.py <meet_id> <categories…>
 - Registry table `swimtrends-meet-registry`. Base times at `reference/point_base_times.jsonl`.
 - The curate trigger URL-decodes the S3 key (`meet%3D…`) — keep that if you touch it.
 
+## Workflow
+Default flow: **brainstorm → spec → plan → build → verify → PR → merge → deploy.**
+Write the spec to `docs/specs/` and commit it *before* implementation starts. Once
+the plan is approved, spawn subagents for the implementation/review waves.
+
+When implementation is complete and tests pass, push the branch and open a PR
+(squash-merge to master, matching history — don't commit to master directly).
+Merging deploys the SPA automatically; afterwards run `make web-refresh` only if
+the data needs it (see Guardrails).
+
+**All GitHub operations go through the `gh` CLI** — never the web UI, never raw
+`curl` to the API. The `test-and-deploy` job in `.github/workflows/ci.yml` runs on
+every PR, so wait for it to be green before merging.
+```bash
+git push -u origin <branch>
+gh pr create --base master --title "<type>: <summary>" --body "<what + why>"
+gh pr checks --watch          # CI status for the current branch's PR
+gh pr merge --squash --delete-branch
+```
+
+### Specs and plans
+- Enumerate **every** affected page / view / data path in the spec, explicitly —
+  a list, not a hand-wave.
+- Re-read the plan for self-contradictions before starting tasks; helper-function
+  signatures that drift between steps are the usual offender.
+
+### Browser verification
+UI changes get a real browser screenshot before the PR (`/run-web`). Run
+`npx playwright install chromium` first and check that the installed browser
+matches the Playwright package version. No Chrome extensions.
+
 ## Environment & setup
 Two independent virtualenvs:
 - **App/tests:** `st-scrape/.venv` ← `requirements.txt` (+ `requirements-dev.txt`, `requirements-notebook.txt`). Python 3.12. `requirements.txt` is what both Fargate images install, so the AI-evaluation deps (`strands-agents`, `pydantic`) live in `requirements-eval.txt`, pulled in by `requirements-dev.txt`.
@@ -141,11 +172,14 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
 - **Analytics views** are plain SQL in `st-scrape/analytics/views/*.sql`, loaded
   in filename order; they bind to `cur_obt`/`cur_dim_meet`/`cur_fact_split`.
   Prefer a view over baking derived policy into curate (junior status, etc.).
-- Match surrounding style; keep changes minimal and focused.
-- **Workflow:** when implementation is complete and tests pass, push the branch
-  and open a PR (squash-merge to master, matching history — don't commit to
-  master directly). Merging deploys the SPA automatically; afterwards run
-  `make web-refresh` only if the data needs it (see Guardrails).
+- Match surrounding style; keep changes minimal and focused. See
+  [Workflow](#workflow) for the branch → PR → deploy loop.
+- **CI covers infra too:** a new CDK stack or infrastructure change ships with a
+  CI test in the *same* PR. Data-zone resources need an IAM **Deny** on delete
+  actions.
+- **Shell scripts:** when killing processes use a pattern that can't match the
+  killing command itself (`pkill -f '[d]ev-server'`). In Playwright, prefer
+  unambiguous locators (`getByRole` with exact names) over text substrings.
 
 ## Guardrails
 - **Be polite to svømmetider.dk** (host `xn--svmmetider-1cb.dk`): single,
