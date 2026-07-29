@@ -50,6 +50,18 @@ def _cached_payload(category, meet_id, body="cached tekst"):
             "sections": [{"heading": h, "body": body} for h in ag.HEADINGS]}
 
 
+def _counts(total, hit, generated, skipped, written):
+    """The full stats dict, for tests asserting run()'s outcome by equality.
+
+    Equality rather than per-key checks so a new counter cannot appear
+    unnoticed; the token counters default to 0 here because these tests stub
+    out the agent and spend nothing. The two token tests assert those keys
+    directly."""
+    return {"total": total, "hit": hit, "generated": generated,
+            "skipped": skipped, "written": written,
+            "input_tokens": 0, "output_tokens": 0}
+
+
 def _valid_sections(digest, body_extra=""):
     """Sections whose only number (entrants) is licensed by the digest, so a
     real ag.evaluate() call (with a FakeAgent) would pass check_numbers."""
@@ -97,7 +109,7 @@ def test_cache_hit_skips_evaluate_and_writes_cached_payload_verbatim(tmp_path, m
     stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
 
     assert not called
-    assert stats == {"total": 1, "hit": 1, "generated": 0, "skipped": 0, "written": 1}
+    assert stats == _counts(1, 1, 0, 0, 1)
     written = json.loads((tmp_path / CATEGORY / MEET_A / "evaluation.json").read_text())
     assert written == payload
 
@@ -115,7 +127,7 @@ def test_force_on_hit_calls_evaluate_and_overwrites_the_cache(tmp_path, monkeypa
     stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], force=True, **KWARGS)
 
     assert len(calls) == 1
-    assert stats == {"total": 1, "hit": 0, "generated": 1, "skipped": 0, "written": 1}
+    assert stats == _counts(1, 0, 1, 0, 1)
     stored = cache.get(client, CATEGORY, MEET_A, key)
     assert stored["sections"] == new_sections
 
@@ -137,7 +149,7 @@ def test_digest_failure_skips_the_meet_and_writes_nothing(tmp_path, monkeypatch,
 
     stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
 
-    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert stats == _counts(1, 0, 0, 1, 0)
     assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
     assert f"digest failed for {CATEGORY}/{MEET_A}" in caplog.text
 
@@ -163,7 +175,7 @@ def test_empty_digest_skips_without_calling_evaluate_or_touching_the_cache(
 
     assert not evaluate_calls
     assert not put_calls
-    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert stats == _counts(1, 0, 0, 1, 0)
     assert not (tmp_path / CATEGORY).exists()
 
 
@@ -184,7 +196,7 @@ def test_evaluation_error_skips_and_does_not_clobber_a_good_prior_cache_entry(
     # like in production.
     stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], force=True, **KWARGS)
 
-    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert stats == _counts(1, 0, 0, 1, 0)
     assert cache.get(client, CATEGORY, MEET_A, key) == good
     assert not (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
 
@@ -209,7 +221,7 @@ def test_a_skip_removes_a_stale_evaluation_from_an_earlier_run(tmp_path, monkeyp
 
     stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
 
-    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert stats == _counts(1, 0, 0, 1, 0)
     assert not stale.exists()
 
 
@@ -268,7 +280,7 @@ def test_a_guardrail_blocked_response_writes_nothing_to_the_cache(
 
     stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
 
-    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert stats == _counts(1, 0, 0, 1, 0)
     assert cache.get(client, CATEGORY, MEET_A, key) is None
     assert not (tmp_path / CATEGORY).exists()
     assert "guardrail" in caplog.text.lower()
@@ -303,7 +315,7 @@ def test_an_output_guardrail_block_writes_nothing_to_the_cache(tmp_path, monkeyp
 
     stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
 
-    assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+    assert stats == _counts(1, 0, 0, 1, 0)
     assert cache.get(client, CATEGORY, MEET_A, key) is None
     assert not (tmp_path / CATEGORY).exists()
 
@@ -360,10 +372,10 @@ def test_dry_run_never_calls_evaluate_or_put(tmp_path, monkeypatch, prime_cache)
     assert not evaluate_calls
     assert not put_calls
     if prime_cache:
-        assert stats == {"total": 1, "hit": 1, "generated": 0, "skipped": 0, "written": 1}
+        assert stats == _counts(1, 1, 0, 0, 1)
         assert (tmp_path / CATEGORY / MEET_A / "evaluation.json").exists()
     else:
-        assert stats == {"total": 1, "hit": 0, "generated": 0, "skipped": 1, "written": 0}
+        assert stats == _counts(1, 0, 0, 1, 0)
         assert not (tmp_path / CATEGORY).exists()
 
 
@@ -530,3 +542,45 @@ def test_main_rejects_an_explicitly_empty_meets_flag(tmp_path, guardrail_env):
     # --dry-run with the env satisfied still reaches it.
     with pytest.raises(SystemExit, match="empty"):
         cli.main(["--out", str(tmp_path), "--model", MODEL_ID, "--dry-run", "--meets", ""])
+
+
+def test_run_reports_the_tokens_it_spent(tmp_path, monkeypatch):
+    """The batch that ran away had no accounting at all.
+
+    compare.py — a hand-run harness that cannot loop — reports tokens and cost
+    per model, while the unattended nightly batch reported neither. So the day a
+    rejected field sent one meet into 105 tool calls, the only evidence was the
+    AWS bill two days later: `generated=25, skipped=16` looked like a healthy
+    run. Tokens are what is billed, so tokens are what the summary has to name.
+    """
+    con = digest_con()
+    _bucket()
+
+    class UsedTokens:
+        """A Strands AgentResult's accumulated usage, per meet."""
+        event_loop_metrics = type("M", (), {
+            "accumulated_usage": {"inputTokens": 3000, "outputTokens": 700,
+                                  "totalTokens": 3700}})()
+
+    monkeypatch.setattr(cli.ag, "build_agent", lambda **kw: UsedTokens())
+    monkeypatch.setattr(cli.ag, "evaluate", lambda d, **k: _valid_sections(d))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], **KWARGS)
+
+    assert stats["input_tokens"] == 3000
+    assert stats["output_tokens"] == 700
+
+
+def test_run_reports_zero_tokens_on_an_all_cached_batch(tmp_path, monkeypatch):
+    """A cache hit calls no model, so a run of hits must read as free. The
+    counters come off the agent, which a --dry-run never builds — so they have to
+    survive an agent of None rather than crash the batch that spends nothing."""
+    con = digest_con()
+    _, key = _key(con, CATEGORY, MEET_A)
+    client = _bucket()
+    cache.put(client, CATEGORY, MEET_A, key, _cached_payload(CATEGORY, MEET_A))
+
+    stats = cli.run(con, tmp_path, meets=[(CATEGORY, MEET_A)], dry_run=True, **KWARGS)
+
+    assert stats["input_tokens"] == 0
+    assert stats["output_tokens"] == 0

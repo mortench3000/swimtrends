@@ -70,6 +70,23 @@ def _drop_stale(out: Path, category: str, meet_id: str, *, dry_run: bool) -> Non
     (out / category / meet_id / "evaluation.json").unlink(missing_ok=True)
 
 
+def _spent(agent) -> tuple[int, int]:
+    """(input, output) tokens the agent has spent, cumulative over the batch.
+
+    Read once at the end rather than per meet: strands accumulates across every
+    invocation of the same agent, and `evaluate` clears the conversation but not
+    the counters. Defensive because the metrics shape varies by SDK version and
+    because a --dry-run never builds an agent at all — an unreported number is a
+    worse outcome than an approximate one, but neither is worth failing a batch
+    that already produced its reports.
+    """
+    try:
+        usage = agent.event_loop_metrics.accumulated_usage
+        return int(usage.get("inputTokens", 0)), int(usage.get("outputTokens", 0))
+    except Exception:
+        return 0, 0
+
+
 def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: str,
         meets=None, force: bool = False, dry_run: bool = False) -> dict:
     s3 = boto3.client("s3", region_name=ag.REGION)
@@ -85,7 +102,8 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
     # `meets is None` means "no filter" -- an empty list is a filter that
     # selected nothing, and must not silently widen to the whole registry.
     meet_list = _all_meets(con) if meets is None else meets
-    stats = {"total": len(meet_list), "hit": 0, "generated": 0, "skipped": 0, "written": 0}
+    stats = {"total": len(meet_list), "hit": 0, "generated": 0, "skipped": 0,
+             "written": 0, "input_tokens": 0, "output_tokens": 0}
 
     for category, meet_id in meet_list:
         # One outer catch-all per meet: cache.get/put and write_json are not
@@ -152,6 +170,7 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
             stats["skipped"] += 1
             _drop_stale(out, category, meet_id, dry_run=dry_run)
 
+    stats["input_tokens"], stats["output_tokens"] = _spent(agent)
     return stats
 
 

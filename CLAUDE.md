@@ -43,7 +43,7 @@ Scraping and AWS commands need network + credentials.
 ## Common commands (run from the dir shown)
 ```bash
 # Tests — always run before claiming done
-cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion + evaluation (271)
+cd st-scrape       && .venv/bin/python -m pytest -q        # app + analytics + ingestion + evaluation (276)
 cd swimtrends-app  && .venv/bin/python -m pytest tests/unit # CDK assertions (44)
 cd web             && npm test                              # SPA unit tests (36)
 
@@ -148,7 +148,15 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   blocked a real report on aggregate prose. A block is **retried** like a
   fabricated number (the rewrite prompt names the section and the offence),
   because what fails in practice is the model, not the policy: causal prose rule
-  6 already forbids. See [`docs/analytics.md`](docs/analytics.md).
+  6 already forbids. **Cost has a hard ceiling**: `LIMITS` (`agent.py`) caps every
+  invocation at 6 turns / 40k total tokens, because a rejected structured-output
+  field makes Strands re-call the tool with the whole conversation *plus every
+  prior rejection* resent — one misspelled heading cost 105 calls and ~1.4M input
+  tokens on a single meet, ~$31 across that day's batch. `limits` is
+  per-invocation, so an `agent(...)` call without it is an uncapped meet; a trip
+  raises and is *not* retried. The run summary reports `input_tokens`/
+  `output_tokens` for the same reason — `generated=25, skipped=16` read as
+  healthy. See [`docs/analytics.md`](docs/analytics.md).
 
 ## Development conventions
 - **TDD.** Write the failing test first, watch it fail, then implement. App tests

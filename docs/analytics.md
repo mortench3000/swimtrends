@@ -291,14 +291,38 @@ left there is deleted, so a skip can never republish superseded text. The
 later run succeeds — the page falls back to rendering without it, same as any
 other skip.
 
+### Cost, and the ceiling on it
+
 A full generation of every meet can exhaust the account's **daily** Bedrock
 token quota. Observed on the first full-set run: `ThrottlingException: Too many
 tokens per day`, after which every remaining meet fails and the run appears to
 hang (the retries back off for minutes at a time). Nothing is lost — the meets
 already generated are cached, so re-running the next day resumes and pays only
-for what is left. The cost driver to watch is a model that loops on a rejected
-tool call; the section heading is a schema enum specifically because one
-misspelling once cost 105 tool calls on a single meet.
+for what is left.
+
+What exhausted it was not the batch's size. A rejected structured-output field
+makes Strands re-call the tool, resending the whole conversation **plus every
+prior rejection**, so input grows per call and the total grows quadratically:
+one misspelled section heading cost **105 tool calls and ~1.4M input tokens on a
+single meet**. The day billed ~28M input tokens (**$30.87**) against an expected
+~0.2M (~$0.29) — 94% of it input, ~120× over.
+
+Three measures, each addressing a different link in that chain:
+
+| measure | where | what it stops |
+| --- | --- | --- |
+| the section heading is a schema `Literal` | `Section.heading` | the trigger: the model can read the four legal strings *before* it answers, instead of being told only that its guess was wrong |
+| `LIMITS = {"turns": 6, "total_tokens": 40_000}` on every invocation | `evaluate()` | the runaway itself — a hard per-meet ceiling ~10× a healthy meet's spend and ~35× below what the incident cost |
+| `input_tokens` / `output_tokens` in the run summary | `run()` | the blindness: `generated=25, skipped=16` read as a healthy run, and the only evidence was the bill two days later |
+
+`limits` is **per invocation, not per agent** — it cannot be set once on the
+`Agent`, so an `agent(...)` call that omits it is an uncapped meet. A trip ends
+the invocation with a `limit_*` stop reason and no structured output, which is
+indistinguishable from an empty answer unless it is named; `evaluate` raises on
+it and does **not** retry, since a trip means the meet already spent its whole
+allowance. Note what the caps do *not* do: they bound one meet, not the batch, so
+41 pathological meets would still cost 41 × 40k. The daily quota is the backstop
+there.
 
 If **more meets are skipped than written** — wrong `EVAL_MODEL_ID`, a revoked
 guardrail, expired credentials, throttling partway through — `web-eval` exits

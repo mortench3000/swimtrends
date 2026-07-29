@@ -35,10 +35,12 @@ class FakeAgent:
     def __init__(self, *reports):
         self.reports = list(reports)
         self.prompts = []
+        self.kwargs = []
         self.messages = []
 
     def __call__(self, prompt, **kwargs):
         self.prompts.append(prompt)
+        self.kwargs.append(kwargs)
         report = self.reports.pop(0)
         return report if isinstance(report, FakeResult) else FakeResult(report)
 
@@ -450,3 +452,42 @@ def test_a_bad_heading_error_names_the_allowed_headings():
         ag.Section(heading="Fremhævede svømminger", body="x")
     for heading in ag.HEADINGS:
         assert heading in str(e.value)
+
+
+def test_evaluate_caps_the_tool_loop_with_a_token_budget():
+    """The measured incident this exists for: a rejected structured-output field
+    made strands re-call the tool 105 times on ONE meet. Each re-call resends the
+    whole conversation plus every prior rejection, so input grows per call and the
+    total grows quadratically — that single meet cost roughly 1.4M input tokens.
+    Across the batch the day's Bedrock bill was ~28M input tokens / $30.87
+    against an expected ~0.2M / $0.29.
+
+    strands' MAX_ATTEMPTS=6 does not help: it governs *throttle* retries, not the
+    agentic tool loop, which recurses as long as the model keeps calling the
+    tool. `limits` is the per-invocation cap that does bound it, and it must be
+    passed at every call site — an omitted `limits=` is an uncapped meet.
+    """
+    fake = FakeAgent(_sections("612 point."))
+    ag.evaluate(DIGEST, agent=fake, guard=_guard())
+    assert fake.kwargs[0]["limits"] == ag.LIMITS
+
+
+def test_the_token_budget_leaves_room_for_a_healthy_meet():
+    """A real meet spends ~3k input and ~700 output tokens per attempt, so the
+    caps have to sit far above that or they would fire on healthy work — while
+    still being small enough that a runaway loop cannot reach 1.4M."""
+    assert ag.LIMITS["total_tokens"] >= 20_000
+    assert ag.LIMITS["total_tokens"] <= 200_000
+    assert ag.LIMITS["turns"] >= 3
+    assert ag.LIMITS["turns"] <= 12
+
+
+def test_evaluate_raises_when_the_token_budget_stops_the_loop():
+    """A capped loop must fail the meet loudly. strands ends the invocation with
+    a `limit_*` stop reason and no structured output — indistinguishable from a
+    healthy empty answer unless we name it, which is exactly how the 105-call
+    meet surfaced as an unexplained traceback the first time."""
+    fake = FakeAgent(FakeResult(None, stop_reason="limit_total_tokens"))
+    with pytest.raises(ag.EvaluationError, match="token budget"):
+        ag.evaluate(DIGEST, agent=fake, guard=_guard())
+    assert len(fake.prompts) == 1     # a budget trip is not retried: retrying pays again

@@ -32,6 +32,22 @@ SCHEMA_VERSION = "2"
 REGION = "eu-west-1"
 MAX_TOKENS = 1200
 
+# The spend ceiling for one meet, passed to every agent invocation. A healthy
+# meet takes one turn of ~3k input + ~700 output tokens, and the retry path adds
+# at most one more — so 40k/6 leaves an order of magnitude of headroom while
+# capping what a runaway costs.
+#
+# It exists because a rejected structured-output field makes strands re-call the
+# tool with the whole conversation *plus every prior rejection* resent, so input
+# grows per call and the total grows quadratically. One misspelled heading cost
+# 105 calls and ~1.4M input tokens on a single meet, and the day's batch billed
+# ~28M input tokens ($30.87) against an expected ~0.2M ($0.29). strands does not
+# bound this on its own: its MAX_ATTEMPTS=6 governs *throttle* retries, not the
+# agentic loop, which recurses as long as the model keeps calling the tool.
+# `limits` is per-invocation, not per-agent — an agent(...) call without it is an
+# uncapped meet.
+LIMITS = {"turns": 6, "total_tokens": 40_000}
+
 # The instruction the report answers, sent to ApplyGuardrail tagged `query` so
 # the RELEVANCE half of the contextual grounding filter has something to
 # compare the report against.
@@ -289,14 +305,23 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> li
         result = agent(_prompt(digest_json,
                                offenders if attempt else None,
                                blocked if attempt else None),
-                       structured_output_model=MeetEvaluation)
+                       structured_output_model=MeetEvaluation,
+                       limits=LIMITS)
         # A block is a failure, not a fallback — and it must be detected
         # explicitly. Strands leaves guardrail_redact_output False and does not
         # raise, so without these two checks a block surfaced only as an
         # incidental AttributeError on report.sections (a blocked response has
         # no tool-use block), which run() logged as an unexplained traceback.
-        if getattr(result, "stop_reason", None) == "guardrail_intervened":
+        stop_reason = getattr(result, "stop_reason", None)
+        if stop_reason == "guardrail_intervened":
             raise EvaluationError("the guardrail blocked the Converse call")
+        # Same shape as a block — no structured output, no exception — so name it
+        # rather than let it read as an empty answer. Not retried: a trip means
+        # the model already burned the meet's whole allowance.
+        if str(stop_reason).startswith("limit_"):
+            raise EvaluationError(
+                f"the token budget stopped the tool loop ({stop_reason}, "
+                f"limits={LIMITS})")
         report = result.structured_output
         if report is None:
             raise EvaluationError("the model returned no structured output")
