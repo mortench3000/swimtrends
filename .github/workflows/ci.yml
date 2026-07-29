@@ -1,9 +1,16 @@
 name: CI
 
+# Docs- and legacy-only changes skip CI: no test or deploy step reads markdown,
+# the SPA build doesn't either, and legacy/ is unmaintained (its only in-repo
+# reader is gen_base_times.py, which CI never runs). paths-ignore only skips when
+# *every* changed file matches, so a PR touching docs *and* code still runs the
+# full job.
 on:
   pull_request:
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'legacy/**']
   push:
     branches: [master]
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'legacy/**']
 
 permissions:
   id-token: write   # mint the OIDC token
