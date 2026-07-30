@@ -13,7 +13,8 @@ registry + dispatcher Lambda + Fargate scraper, hourly EventBridge cycle).
 | Path | What |
 | --- | --- |
 | `st-scrape/` | **The application.** `scrape_races.py` (scraper), `curate/` (raw→Parquet transform), `analytics/` (DuckDB views + loader), `ingestion/` (registry, dispatcher, `cli.py`), `webbuild/` (curated→SPA JSON + `digest.py`), `evaluation/` (AI meet reports: agent, S3 cache, number check), `gen_base_times.py`, `tests/`, `notebooks/`. |
-| `swimtrends-app/` | AWS **CDK infrastructure** (Python): S3, DynamoDB, dispatcher/curate Lambdas, Fargate task defs, SNS, Glue. Stacks in `swimtrends_app/*_stack.py`; tests in `tests/unit`. |
+| `web/` | The **SPA** (Svelte 5 + Vite). Real path routes (`/<cat>/<meetId>/<raceKey>`), `prerender.mjs` post-build step, `src/lib/seo.js` shared with it. |
+| `swimtrends-app/` | AWS **CDK infrastructure** (Python): S3, DynamoDB, dispatcher/curate Lambdas, Fargate task defs, SNS, Glue. Stacks in `swimtrends_app/*_stack.py`; tests in `tests/unit`; `cloudfront/append_index.js` viewer function. |
 | `docs/` | [`analytics.md`](docs/analytics.md) (querying), [`ingestion.md`](docs/ingestion.md) (operational CLI), design specs/plans under `superpowers/`. |
 | `legacy/` | Deprecated original Scrapy → PostgreSQL pipeline + Docker. Not maintained. See [`legacy/README.md`](legacy/README.md). Don't build on it. |
 
@@ -152,6 +153,21 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
 - **DSQ**: renders as a **7-column** row (rank cell `-`, `DSQ` in the time cell).
   The parser accepts `len(cells) >= 6` and maps a non-numeric rank to `-1`;
   curate excludes `rank == -1` from scoring. Don't reintroduce a `== 6` check.
+- **Search indexing**: the SPA uses **real paths**, not hash routes (`/DM-L/12486`);
+  old `#/c/…/m/…` links are redirected by `legacyPath()` in `web/src/router.js`.
+  `npm run build` runs `prerender.mjs` after vite, writing 47 static shells (home,
+  5 categories, 41 meets — meet prose comes from the AI evaluations) plus
+  `sitemap.xml`. Three things are load-bearing:
+  * It fetches the **live** `https://swimtrends.dk/data` because `web/public/data`
+    is gitignored and CI has no local copy. A fetch failure **must** fail the
+    build — `web-deploy` syncs `--delete`, so prerendering nothing would delete
+    the good pages. Override the source with `SEO_DATA_BASE`.
+  * `cloudfront/append_index.js` (viewer-request) is what makes those shells
+    reachable: the S3 REST/OAC origin has no directory index, so without it every
+    prerendered page 404s into the SPA fallback and silently serves the generic
+    shell. Its 11-URI table test runs the real function body through `node`.
+  * `main.js` clears `#app` before `mount()` — Svelte 5 `mount()` appends, so the
+    static shell would otherwise remain under the hydrated app.
 - **AI evaluations**: meet pages can carry a batch-generated Danish coach report
   (`evaluation/`). The model sees only the **digest** (`webbuild/digest.py`) and
   every number in the published text must exist in it (`evaluation/check.py`).

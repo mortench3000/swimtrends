@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+
+# /data/*.json is deliberately crawlable: the SPA fetches it to render, so
+# blocking it would break Google's rendered view of every page.
+
+Sitemap: https://swimtrends.dk/sitemap.xml

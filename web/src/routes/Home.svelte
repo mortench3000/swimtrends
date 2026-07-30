@@ -1,8 +1,10 @@
 <script>
   import { onMount } from 'svelte'
   import { getIndex, getMeets } from '../lib/dataClient.js'
-  import { href } from '../router.js'
+  import { href, navigate } from '../router.js'
   import { formatInt } from '../lib/format.js'
+  import { setMeta } from '../lib/meta.js'
+  import { categoryMeta, homeMeta } from '../lib/seo.js'
   import Breadcrumbs from '../components/Breadcrumbs.svelte'
 
   // props: { params } — params.cat preselects a category; falls back to the
@@ -24,6 +26,8 @@
     try {
       index = await getIndex()
       if (!cat) cat = index.categories[0]?.code ?? null
+      // The bare root stays the site landing page; /DM-L is the category page.
+      setMeta(params.cat ? categoryMeta(cat) : homeMeta())
       await loadMeets()
     } catch (e) {
       err = e
@@ -47,7 +51,9 @@
   function pick(code) {
     if (code === cat) return
     cat = code
-    location.hash = href('home', { cat })
+    // navigate() re-keys the route in App.svelte, which remounts this component
+    // and re-runs load() — hence no setMeta here.
+    navigate(href('home', { cat }))
     loadMeets()
   }
 </script>

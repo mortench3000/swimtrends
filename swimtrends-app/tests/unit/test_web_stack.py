@@ -1,6 +1,10 @@
 import json
+import pathlib
+import shutil
+import subprocess
 
 import aws_cdk as cdk
+import pytest
 from aws_cdk import assertions
 from swimtrends_app.swimtrends_cert_stack import SwimtrendsCertStack
 from swimtrends_app.swimtrends_web_stack import SwimtrendsWebStack
@@ -39,6 +43,54 @@ def test_distribution_has_domain_and_spa_fallback():
             "DefaultRootObject": "index.html",
         })
     })
+
+
+def test_viewer_function_is_associated_with_the_default_behavior():
+    t = _template()
+    t.resource_count_is("AWS::CloudFront::Function", 1)
+    t.has_resource_properties("AWS::CloudFront::Distribution", {
+        "DistributionConfig": assertions.Match.object_like({
+            "DefaultCacheBehavior": assertions.Match.object_like({
+                "FunctionAssociations": [assertions.Match.object_like({
+                    "EventType": "viewer-request",
+                })],
+            }),
+        })
+    })
+
+
+# The S3 REST origin (OAC) has no directory index, so without this rewrite every
+# prerendered page 404s into the SPA fallback and serves the *generic* shell —
+# silently, which is the bug this whole change exists to fix. Run the real
+# function body through node rather than trusting it by inspection.
+FUNC_JS = pathlib.Path(__file__).resolve().parents[2] / "cloudfront" / "append_index.js"
+
+
+def _rewrite(uri: str) -> str:
+    script = FUNC_JS.read_text() + (
+        f"\nprocess.stdout.write(handler({{request:{{uri:{json.dumps(uri)}}}}}).uri)")
+    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
+    return out.stdout
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize("uri,expected", [
+    ("/", "/index.html"),
+    ("/DM-L", "/DM-L/index.html"),
+    ("/DM-L/12486", "/DM-L/12486/index.html"),
+    # No prerendered file for races: rewritten, 404s, SPA fallback renders it.
+    ("/DM-L/12486/M-100-Fri-LCM", "/DM-L/12486/M-100-Fri-LCM/index.html"),
+    # Anything with an extension is a real object and must pass through.
+    ("/index.html", "/index.html"),
+    ("/robots.txt", "/robots.txt"),
+    ("/sitemap.xml", "/sitemap.xml"),
+    ("/data/index.json", "/data/index.json"),
+    ("/data/DM-L/12486/evaluation.json", "/data/DM-L/12486/evaluation.json"),
+    ("/assets/index-UEnPeQyb.js", "/assets/index-UEnPeQyb.js"),
+    ("/assets/inter-latin-400-normal-C38fXH4l.woff2", "/assets/inter-latin-400-normal-C38fXH4l.woff2"),
+])
+def test_append_index_rewrites_only_extensionless_paths(uri, expected):
+    assert _rewrite(uri) == expected
 
 
 def test_route53_alias_record_created():

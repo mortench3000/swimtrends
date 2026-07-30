@@ -3,7 +3,7 @@
 import { chromium } from 'playwright'
 
 const OUT = process.env.OUT || '/tmp/swimtrends-shot'
-const ROUTE = process.env.ROUTE || '#/c/DM-L/m/10334' // a meet with relays + both genders
+const ROUTE = process.env.ROUTE || 'DM-L/10334' // a meet with relays + both genders
 const URL = `http://localhost:${process.env.PORT || 5199}/${ROUTE}`
 
 const browser = await chromium.launch()
