@@ -7,6 +7,8 @@
   import StatTile from '../components/StatTile.svelte'
   import TrendChart from '../components/TrendChart.svelte'
   import Podium from '../components/Podium.svelte'
+  import { setMeta } from '../lib/meta.js'
+  import { raceMeta } from '../lib/seo.js'
 
   // props: { params: { cat, meetId, raceKey } }
   let { params = {} } = $props()
@@ -23,6 +25,7 @@
     err = null
     try {
       race = await getRace(params.cat, params.meetId, params.raceKey)
+      setMeta(raceMeta(race))
     } catch (e) {
       err = e
     } finally {

@@ -1,6 +1,8 @@
 """Swimtrends public web app hosting: private S3 + CloudFront (OAC) + Route53
 alias for swimtrends.dk. Static SPA + precomputed /data/*.json are pushed by
 the deploy/refresh script (see docs/superpowers/deploy-web.md), not by CDK."""
+from pathlib import Path
+
 from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_budgets as budgets
 from aws_cdk import aws_certificatemanager as acm
@@ -33,12 +35,24 @@ class SwimtrendsWebStack(Stack):
             auto_delete_objects=True,
         )
 
+        # Kept for the routes that are *not* prerendered (races, unknown paths):
+        # the SPA reads location.pathname and renders them client-side.
         spa_fallback = [
             cloudfront.ErrorResponse(
                 http_status=code, response_http_status=200,
                 response_page_path="/index.html", ttl=Duration.minutes(5))
             for code in (403, 404)
         ]
+
+        # Without this, the prerendered pages (web/prerender.mjs) are unreachable
+        # — see cloudfront/append_index.js.
+        append_index = cloudfront.Function(
+            self, "AppendIndex",
+            code=cloudfront.FunctionCode.from_file(
+                file_path=str(Path(__file__).parents[1] / "cloudfront" / "append_index.js")),
+            runtime=cloudfront.FunctionRuntime.JS_2_0,
+            comment="Append /index.html to extensionless paths (S3 OAC has no directory index)",
+        )
 
         distribution = cloudfront.Distribution(
             self, "Distribution",
@@ -49,6 +63,9 @@ class SwimtrendsWebStack(Stack):
                 origin=origins.S3BucketOrigin.with_origin_access_control(bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
+                function_associations=[cloudfront.FunctionAssociation(
+                    function=append_index,
+                    event_type=cloudfront.FunctionEventType.VIEWER_REQUEST)],
             ),
             error_responses=spa_fallback,
             price_class=cloudfront.PriceClass.PRICE_CLASS_100,

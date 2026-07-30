@@ -30,6 +30,7 @@ Root cause, in order of severity:
 2. **The one addressable URL has no content without JS.** `<title>Swimtrends</title>`,
    no meta description, no `<h1>`, empty `<div id="app">`. Google renders JS, but
    there is one URL with a generic title and nothing to match a query against.
+   (Content counts, measured: 41 meets and ~1700 races across 5 categories.)
 3. **No `robots.txt`, no `sitemap.xml`.** Both are swallowed by the
    403/404 → `/index.html` error responses in `swimtrends_web_stack.py:36-41`.
 4. **Nothing links to the domain and it was never submitted** to Search Console.
@@ -57,11 +58,18 @@ category codes are non-numeric (`DM-L`, `DM-K`, `DMJ-L`, `DMJ-K`, `DO`) and meet
 ids are numeric, so there is no collision. Real files (`/assets/*`, `/data/*`,
 `/robots.txt`, `/sitemap.xml`) all carry an extension and never look like routes.
 
-**Prerender scope — home + the 46 meet pages.** Meet pages carry the AI
-evaluation prose (`data/<cat>/<meet>/evaluation.json`), which is genuinely unique
-Danish text worth indexing. Race pages are near-duplicate result tables with no
-prose; ~1700 thin pages risk being read as low quality, and they stay
-SPA-reachable but out of the sitemap.
+**Prerender scope — home + 5 category pages + 41 meet pages = 47 URLs.** Meet
+pages carry the AI evaluation prose (`data/<cat>/<meet>/evaluation.json`), which
+is genuinely unique Danish text worth indexing. Race pages are near-duplicate
+result tables with no prose; ~1700 thin pages risk being read as low quality, and
+they stay SPA-reachable but out of the sitemap.
+
+Category pages were added to the original home-plus-meets scope because they cost
+~15 lines and their data was already being fetched, and they turn the sitemap into
+a real **crawl graph**: home links to all 5 categories, each category links to its
+meets, all in static HTML. Static internal links are a stronger discovery signal
+than a sitemap alone. Meet pages deliberately do *not* link to their ~42 races —
+that would put 1700 out-of-scope URLs back into the crawl.
 
 **Prerender input — fetched from the live `/data` zone at build time.**
 `web/public/data/` is **gitignored**, so CI has no data when it runs
@@ -144,7 +152,7 @@ already-`defaultPrevented` events.
 | File | Change |
 | --- | --- |
 | `web/public/robots.txt` | **new** — `Allow: /` + `Sitemap:` line. Deliberately does **not** disallow `/data/`: Google needs to fetch it to render the SPA |
-| `web/prerender.mjs` | **new** — fetch data, write `dist/<cat>/<meet>/index.html` × 46 and `dist/sitemap.xml`; exports pure `renderShell`/`buildSitemap` for tests |
+| `web/prerender.mjs` | **new** — fetch data, write 47 `index.html` shells (home, 5 categories, 41 meets) + `dist/sitemap.xml`; exports pure `renderShell`/`buildSitemap` for tests |
 | `web/package.json` | `"build": "vite build && node prerender.mjs"` |
 | `web/src/main.js` | clear `#app` before `mount()` — Svelte 5 `mount()` **appends**, so the prerendered fallback body would otherwise stay on screen under the hydrated app |
 | `web/tests/seo.test.js` | **new** — `renderShell`, `buildSitemap`, title/description builders |
@@ -156,8 +164,13 @@ publish 46 pages with the wrong `<title>`.
 ### Infra
 | File | Change |
 | --- | --- |
-| `swimtrends-app/swimtrends_app/swimtrends_web_stack.py` | add the viewer-request CloudFront Function, associate it with the default behavior |
-| `swimtrends-app/tests/unit/` | assertion test: function exists, is associated, rewrites extensionless paths |
+| `swimtrends-app/cloudfront/append_index.js` | **new** — the viewer-request function body (ES5; the Functions runtime is not a full JS engine) |
+| `swimtrends-app/swimtrends_app/swimtrends_web_stack.py` | load it with `FunctionCode.from_file`, associate on the default behavior |
+| `swimtrends-app/tests/unit/test_web_stack.py` | assertion test (function exists + associated) **plus** a table-driven test that runs the real function body through `node` over 11 URIs |
+
+The rewrite is tested by execution rather than inspection because its failure mode
+is silent: a wrong condition serves the generic shell on all 47 pages, which looks
+exactly like the bug being fixed.
 
 `make web-deploy` needs no change: it already syncs `web/dist → s3://…/` with
 `--delete --exclude "data/*"`, and the prerendered files land *inside* `dist`.

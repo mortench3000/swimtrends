@@ -5,13 +5,15 @@ description: Launch the Swimtrends web app (Vite dev server) and screenshot it h
 
 # Run & screenshot the Swimtrends web app
 
-The app (`web/`) is a Svelte 5 + Vite SPA that fetches `/data/*.json`. **That data
-is committed under `web/public/data/`**, so the dev server renders real meets
-fully offline — no build, no AWS, no `make web-refresh` needed.
+The app (`web/`) is a Svelte 5 + Vite SPA that fetches `/data/*.json`. That data
+lives under `web/public/data/` — **gitignored, but generated locally** by
+`make web-dev` / `make web-refresh`, so once it is there the dev server renders
+real meets fully offline (no build, no AWS). If `web/public/data/` is empty, run
+`cd st-scrape && .venv/bin/python -m webbuild --out ../web/public/data` first.
 
-Routes are hash-based: `#/c/<cat>/m/<meetId>` (meet page), `#/c/<cat>` (home),
-`#/c/<cat>/m/<meetId>/r/<raceKey>` (race). Good showcase meet with relays and both
-genders: `DM-L/10334` (DM Langbane 2023).
+Routes are real paths (hash routing was removed 2026-07-30): `/<cat>` (category),
+`/<cat>/<meetId>` (meet), `/<cat>/<meetId>/<raceKey>` (race), `/` (landing). Good
+showcase meet with relays and both genders: `DM-L/10334` (DM Langbane 2023).
 
 ## Launch
 
@@ -42,7 +44,7 @@ node screenshot.mjs             # driver lives IN web/ — bare `import 'playwri
 with env vars:
 
 ```bash
-OUT=/tmp/home ROUTE='#/c/DM-L' PORT=5199 node screenshot.mjs
+OUT=/tmp/home ROUTE='DM-L' PORT=5199 node screenshot.mjs
 ```
 
 Then **look at the PNG** (Read it). A blank frame means the SPA never mounted —

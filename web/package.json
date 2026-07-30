@@ -6,7 +6,7 @@
     "dev": "vite",
     "dev:bg": "vite --port 5199 > /tmp/swimtrends-vite.log 2>&1 & echo 'dev server on http://localhost:5199 (log: /tmp/swimtrends-vite.log). stop: npm run dev:stop'",
     "dev:stop": "pkill -f '[v]ite --port 5199' && echo stopped || echo 'not running'",
-    "build": "vite build",
+    "build": "vite build && node prerender.mjs",
     "preview": "vite preview",
     "test": "vitest run"
   },

@@ -4,6 +4,8 @@
   import { href } from '../router.js'
   import { formatInt, formatPoints, formatTimeStr, formatDelta } from '../lib/format.js'
   import { filterRaces, disciplineOptions, genderOptions } from '../lib/raceFilter.js'
+  import { setMeta } from '../lib/meta.js'
+  import { meetMeta } from '../lib/seo.js'
   import Breadcrumbs from '../components/Breadcrumbs.svelte'
   import StatTile from '../components/StatTile.svelte'
   import TrendChart from '../components/TrendChart.svelte'
@@ -42,6 +44,7 @@
       meet = m
       races = r.races
       evaluation = e
+      setMeta(meetMeta(meet, evaluation))
     } catch (e) {
       err = e
     } finally {
