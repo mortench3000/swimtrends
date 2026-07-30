@@ -618,3 +618,20 @@ def test_a_wrong_gendered_event_that_survives_every_retry_raises():
     fake = FakeAgent(*[_sections("Hun vandt herrernes 50m Ryg.") for _ in range(2)])
     with pytest.raises(ag.EvaluationError, match="gender"):
         ag.evaluate(d, agent=fake, guard=_guard(), retries=1)
+
+
+def test_a_misattributed_result_is_rewritten_before_publishing():
+    """A regenerated DMJ-L/11712 credited Lucas Linderoth with Mathias Hald's
+    772-point 1500m Fri. Every number was real, so check_numbers passed and the
+    guardrail passed — only the name-to-figure binding was wrong."""
+    d = {**DIGEST, "top_swims": [
+        {"name": "Mathias Hald", "club": "Lyngby", "event": "M 1500m Fri (LCM)",
+         "time": "15:48.80", "points": 772, "rank": 1},
+        {"name": "Lucas Linderoth", "club": "Sigma", "event": "M 100m Fri (LCM)",
+         "time": "50.67", "points": 767, "rank": 1}]}
+    fake = FakeAgent(_sections("Lucas Linderoth vandt med 772 point."),   # wrong
+                     _sections("Mathias Hald vandt med 772 point."))      # fixed
+    out = ag.evaluate(d, agent=fake, guard=_guard())
+    assert len(fake.prompts) == 2
+    assert "Lucas Linderoth: 772" in fake.prompts[1]
+    assert "Mathias Hald" in out[0]["body"]

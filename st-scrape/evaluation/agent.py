@@ -22,7 +22,7 @@ from strands import Agent
 from strands.models import BedrockModel
 
 from evaluation.cache import canonical_json
-from evaluation.check import check_genders, check_numbers
+from evaluation.check import check_attribution, check_genders, check_numbers
 
 log = logging.getLogger("evaluation")
 
@@ -292,7 +292,8 @@ class OutputGuard:
 
 
 def _prompt(digest_json: str, offenders: set[str] | None = None,
-            blocked: str | None = None, wrong_gender: set[str] | None = None) -> str:
+            blocked: str | None = None, wrong_gender: set[str] | None = None,
+            misattributed: set[str] | None = None) -> str:
     head = f"<digest>{digest_json}</digest>"
     if offenders:
         bad = ", ".join(sorted(offenders))
@@ -309,6 +310,16 @@ def _prompt(digest_json: str, offenders: set[str] | None = None,
                 f"gender as the first character (\"F 50m Ryg (LCM)\" is a "
                 f"women's race, \"M 50m Ryg (LCM)\" a men's). Rewrite the "
                 f"evaluation and take each event's gender from that marker.")
+    if misattributed:
+        # Quote the pairing, not just the number: the figure itself is real and
+        # in the digest, so "N is wrong" would read as a contradiction.
+        bad = ", ".join(sorted(misattributed))
+        return (f"{head}\n"
+                f"Your previous answer credited the wrong swimmer with these "
+                f"results ({bad}). Each entry in digest.top_swims binds one "
+                f"name to one event, time and points — never move a figure "
+                f"from one swimmer to another, and never total up a swimmer's "
+                f"wins. Rewrite the evaluation.")
     if blocked:
         # The model cannot see the guardrail's verdict, so name the section and
         # the offence. Grounding is what fails here in practice: a section that
@@ -361,6 +372,7 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
     digest_json = canonical_json(digest)
     offenders: set[str] = set()
     wrong_gender: set[str] = set()
+    misattributed: set[str] = set()
     blocked: str | None = None
     for attempt in range(retries + 1):
         if messages is not None:
@@ -368,7 +380,8 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
         result = agent(_prompt(digest_json,
                                offenders if attempt else None,
                                blocked if attempt else None,
-                               wrong_gender if attempt else None),
+                               wrong_gender if attempt else None,
+                               misattributed if attempt else None),
                        structured_output_model=MeetEvaluation,
                        limits=LIMITS)
         # A block is a failure, not a fallback — and it must be detected
@@ -396,13 +409,20 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
         # guardrail would pass this text anyway (0.88 grounding on the real
         # DM-L/9775 sentence, four hundredths below the corrected version).
         wrong_gender = check_genders(text, digest)
-        if not offenders and not wrong_gender:
+        # Same class as the gender flip: a real figure bound to the wrong
+        # athlete, invisible to both the number check and the guardrail.
+        misattributed = check_attribution(text, digest)
+        if not offenders and not wrong_gender and not misattributed:
             sections = [{"heading": s.heading, "body": s.body}
                         for s in report.sections]
             # Last gate before the caller caches and publishes this text.
             blocked = guard.check(sections, digest_json)
             if blocked is None:
                 return sections
+    if misattributed:
+        raise EvaluationError(
+            f"misattributed results {sorted(misattributed)} after "
+            f"{retries + 1} attempts")
     if wrong_gender:
         raise EvaluationError(
             f"wrong gender on {sorted(wrong_gender)} after "

@@ -150,6 +150,135 @@ _CLAIM = re.compile(
 _EVENT = re.compile(rf"^([MFX])\s+([\dx]+)m\s+({_STROKES})\b", re.IGNORECASE)
 
 
+# --- misattributed figures ---------------------------------------------------
+# The other half of the same problem: the figure is real but bound to the wrong
+# athlete. A regenerated DMJ-L/11712 credited Lucas Linderoth with "M 1500m Fri
+# (772 point)" — Mathias Hald's result — and called it his fourth win when he
+# had three. check_numbers passed (772 is in the digest) and the guardrail
+# passed, because nothing either of them looks at was false in isolation.
+#
+# Only the name->points binding is judged, and only where the digest settles it.
+# ponytail: points only, not times. The same map keyed on time strings would
+# extend it, and the observed errors were all points.
+
+# "848 point" / "848 points" — a figure in the attributive position reports use.
+_POINTS = re.compile(r"\b(\d+)\s+points?\b", re.IGNORECASE)
+# A figure can also appear comparatively, and then it is nobody's result:
+# "pointgennemsnit på over 850 point" (DM-L/6516) and "præsterede på 720-750
+# point" (DMJ-L/8609) both bound a threshold to the last swimmer named, which
+# would have rejected two correct reports. A Danish comparison word just before
+# the number, or a range dash joining it to another number, means the figure is
+# describing a band rather than crediting anyone.
+_COMPARATIVE = re.compile(
+    r"(?:\b(?:over|under|omkring|cirka|ca\.?|mindst|højst|mellem|op\s+til|"
+    r"ned\s+til)\s+|\d\s*[-–—]\s*)$", re.IGNORECASE)
+# How far back a name may sit and still own a figure. One sentence of this
+# prose ("Lucas Linderoth fra Sigma Swim Allerød satte resultat i tre
+# discipliner: M 50m Fri med 753 point, ...") runs to ~150 characters, so the
+# window has to clear that; beyond it the binding is guesswork and the check
+# stays quiet rather than reject correct prose.
+_BIND_WINDOW = 250
+# Two or more capitalised words in a row — a person's name in Danish prose,
+# where only the first word of a sentence is otherwise capitalised. Used to
+# detect somebody standing between a known swimmer and a figure. Club names
+# match this too ("Swim Team Odense"), which is why the digest's own club
+# strings are removed from the text before this runs: a club sits between the
+# swimmer and the figure in almost every sentence these reports write.
+_PERSON = re.compile(r"\b[A-ZÆØÅ][\wÆØÅæøå.'-]*(?:\s+[A-ZÆØÅ][\wÆØÅæøå.'-]*)+")
+
+
+def _aggregate_values(digest: dict) -> set[str]:
+    """Digest numbers that are *not* one swimmer's result.
+
+    A median or an entrant count that happens to equal somebody's points makes
+    the provenance of that figure ambiguous, so it is excluded from the check.
+    top_points is deliberately kept: it is by definition the best swim's score,
+    the same number owned by the same swimmer.
+    """
+    out: set[str] = set()
+    facts = {k: v for k, v in (digest.get("facts") or {}).items()
+             if k != "top_points"}
+    for block in (facts, digest.get("derived") or {}):
+        _walk(block, out)
+    for block in (digest.get("season_history") or [], digest.get("by_stroke") or []):
+        _walk(block, out)
+    return out
+
+
+def points_owners(digest: dict) -> dict[str, set[str]]:
+    """points value -> the lowercased swimmer names the digest credits with it."""
+    ambiguous = _aggregate_values(digest)
+    out: dict[str, set[str]] = {}
+    for swim in digest.get("top_swims", []):
+        if not isinstance(swim, dict):
+            continue
+        points, name = swim.get("points"), swim.get("name")
+        if points is None or not isinstance(name, str):
+            continue
+        key = str(points)
+        if key in ambiguous:
+            continue
+        out.setdefault(key, set()).add(name.lower())
+    return out
+
+
+def check_attribution(text: str, digest: dict) -> set[str]:
+    """Points figures in `text` credited to a swimmer the digest says is not
+    their owner, as "Name: points".
+
+    The nearest preceding digest name within `_BIND_WINDOW` is taken as the
+    claimed owner. No name in range means no claim to judge — reports quote
+    aggregate figures with no swimmer attached, and those are not this check's
+    business. A figure two swimmers share licenses either of them.
+    """
+    text = text or ""
+    owners = points_owners(digest)
+    if not owners:
+        return set()
+    # Where each digest swimmer is named, case-insensitively: the reports
+    # sometimes shout a name ("PAULINE MAHIEU") exactly as the source does.
+    mentions: list[tuple[int, str]] = []
+    for name in {s.get("name") for s in digest.get("top_swims", [])
+                 if isinstance(s, dict) and isinstance(s.get("name"), str)}:
+        for m in re.finditer(re.escape(name), text, re.IGNORECASE):
+            mentions.append((m.start(), name.lower()))
+    mentions.sort()
+    # Blank the digest's club strings (same length, so every offset above stays
+    # valid) before looking for an intervening person: "Thea Blomsterberg fra
+    # Swim Team Odense vandt ... 834 point" puts a capitalised club between the
+    # swimmer and her figure in almost every sentence these reports write.
+    masked = text
+    for club in {s.get("club") for s in digest.get("top_swims", [])
+                 if isinstance(s, dict) and isinstance(s.get("club"), str)}:
+        masked = re.sub(re.escape(club), " " * len(club), masked, flags=re.IGNORECASE)
+
+    offenders = set()
+    for m in _POINTS.finditer(text):
+        value = m.group(1)
+        if value not in owners:
+            continue
+        if _COMPARATIVE.search(text, max(0, m.start() - 12), m.start()):
+            continue
+        prior = [(pos, n) for pos, n in mentions if pos < m.start()]
+        if not prior:
+            continue
+        pos, claimed = prior[-1]
+        if m.start() - pos > _BIND_WINDOW:
+            continue
+        # A person named between that swimmer and the figure owns the figure,
+        # not the swimmer upstream of them — and if the digest doesn't carry
+        # them, this check cannot say whose result it is. Staying silent beats
+        # blaming the wrong person: on DM-K/10340 the naive binding reported
+        # "Karoline Barrett: 845" for a sentence that credits Frederik
+        # Lindholm. (Naming a swimmer outside the digest is its own violation;
+        # it is not this function's to report.)
+        if _PERSON.search(masked, pos + len(claimed), m.start()):
+            continue
+        if claimed not in owners[value]:
+            offenders.add(f"{claimed.title()}: {value}")
+    return offenders
+
+
 def genders_in_digest(digest: dict) -> dict[tuple[str, str], set[str]]:
     """(distance, stroke) -> the genders digest.top_swims actually holds."""
     out: dict[tuple[str, str], set[str]] = {}

@@ -192,3 +192,102 @@ def test_prose_without_a_gendered_event_claim_is_clean():
     d = {**DIGEST, "top_swims": [_swim("F 50m Ryg (LCM)")]}
     assert check.check_genders("Blandt herrerne var niveauet højt.", d) == set()
     assert check.check_genders("Medianen faldt 12 point.", d) == set()
+
+
+# --- check_attribution -------------------------------------------------------
+# The model attaches a real figure to the wrong athlete. Observed on a
+# regenerated DMJ-L/11712: "Lucas Linderoth ... M 1500m Fri (772 point)", where
+# 772 is Mathias Hald's result, plus "fire sejre" for a swimmer with three.
+# Every number was real, so check_numbers passed; the guardrail passed too. Only
+# the binding between name and figure was wrong.
+
+ATTRIB = {**DIGEST, "top_swims": [
+    {"name": "Mathias Hald", "club": "Lyngby", "event": "M 1500m Fri (LCM)",
+     "time": "15:48.80", "points": 772, "rank": 1},
+    {"name": "Mathias Hald", "club": "Lyngby", "event": "M 400m Fri (LCM)",
+     "time": "4:00.79", "points": 763, "rank": 1},
+    {"name": "Lucas Linderoth", "club": "Sigma", "event": "M 200m IM (LCM)",
+     "time": "2:04.74", "points": 763, "rank": 1},
+    {"name": "Lucas Linderoth", "club": "Sigma", "event": "M 100m Fri (LCM)",
+     "time": "50.67", "points": 767, "rank": 1},
+]}
+
+
+def test_a_figure_credited_to_the_wrong_swimmer_is_caught():
+    text = ("Lucas Linderoth fra Sigma satte resultat i fire discipliner: "
+            "M 100m Fri med 767 point og M 1500m Fri med 772 point.")
+    assert check.check_attribution(text, ATTRIB) == {"Lucas Linderoth: 772"}
+
+
+def test_correct_attribution_passes():
+    text = ("Mathias Hald vandt M 1500m Fri med 772 point og M 400m Fri med "
+            "763 point. Lucas Linderoth vandt M 100m Fri med 767 point.")
+    assert check.check_attribution(text, ATTRIB) == set()
+
+
+def test_a_figure_two_swimmers_share_licenses_either():
+    """763 is both Mathias Hald's 400m Fri and Lucas Linderoth's 200m IM."""
+    assert check.check_attribution("Mathias Hald tog 763 point.", ATTRIB) == set()
+    assert check.check_attribution("Lucas Linderoth tog 763 point.", ATTRIB) == set()
+
+
+def test_a_figure_with_no_named_swimmer_before_it_is_not_judged():
+    assert check.check_attribution("Topresultatet blev 772 point.", ATTRIB) == set()
+
+
+def test_an_aggregate_figure_is_never_judged_as_an_attribution():
+    """A median that happens to equal a swim's points has ambiguous provenance,
+    and rejecting correct prose is worse than missing one misattribution."""
+    d = {**ATTRIB, "facts": {**ATTRIB["facts"], "median_points": 772}}
+    assert check.check_attribution("Lucas Linderoth ... medianen på 772 point.",
+                                   d) == set()
+
+
+def test_a_name_far_upstream_does_not_bind_a_later_figure():
+    text = "Lucas Linderoth vandt. " + "Feltet var jævnt. " * 20 + "772 point."
+    assert check.check_attribution(text, ATTRIB) == set()
+
+
+def test_a_club_between_the_name_and_the_figure_does_not_break_the_binding():
+    """Reports say "X fra <Club> vandt ... N point", so the club sits between
+    the swimmer and the figure. It must be stepped over, not treated as the
+    claimed owner."""
+    d = {**ATTRIB, "top_swims": [{**ATTRIB["top_swims"][0], "club": "Lyngby Svømmeklub"},
+                                 *ATTRIB["top_swims"][1:]]}
+    assert check.check_attribution(
+        "Mathias Hald fra Lyngby Svømmeklub vandt med 772 point.", d) == set()
+    assert check.check_attribution(
+        "Lucas Linderoth fra Lyngby Svømmeklub vandt med 772 point.", d) == {
+            "Lucas Linderoth: 772"}
+
+
+def test_an_unknown_name_between_them_makes_the_binding_unjudgeable():
+    """If the report names somebody the digest does not carry, the figure
+    belongs to that unknown name, not to the last digest swimmer upstream.
+    Judging it would blame the wrong person — as it did on DM-K/10340, where
+    the check reported "Karoline Barrett: 845" for a sentence crediting
+    Frederik Lindholm. Naming a non-digest swimmer is its own violation; this
+    check stays silent rather than mislabel it."""
+    # Discriminating on purpose: the last *digest* name upstream (Lucas) does
+    # not own 772, so a naive nearest-name binding flags him — for a figure the
+    # sentence credits to someone else entirely.
+    text = "Lucas Linderoth vandt 767 point. Ukendt Svømmer scorede 772 point."
+    assert check.check_attribution(text, ATTRIB) == set()
+
+
+def test_a_threshold_figure_is_not_an_attribution():
+    """"over 850 point" is a comparison, not a claim that the last-named
+    swimmer scored 850. Caught on DM-L/6516, where the sentence "Blandt de tre
+    øvrige pointgennemsnit på over 850 point" bound 850 to Pernille Blume."""
+    text = ("Mathias Hald svømmede stærkt. Blandt resultaterne på over 772 "
+            "point var feltet tæt.")
+    assert check.check_attribution(text, ATTRIB) == set()
+
+
+def test_a_range_endpoint_is_not_an_attribution():
+    """"720-750 point" describes a band. Caught on DMJ-L/8609, where it bound
+    750 to Clara Rybak-Andersen."""
+    text = "Lucas Linderoth vandt. Flere svømmere præsterede på 763-772 point."
+    assert check.check_attribution(text, ATTRIB) == set()
+    assert check.check_attribution(
+        "Lucas Linderoth præsterede på 763–772 point.", ATTRIB) == set()

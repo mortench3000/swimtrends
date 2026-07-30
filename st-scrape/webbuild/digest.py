@@ -110,6 +110,16 @@ _DIST_GROUP = """
 """
 
 # One row per swimmer per event (heats/final deduped), best swims first.
+#
+# The ORDER BY must be a TOTAL order. `points DESC` alone is not: when several
+# swims tie across the LIMIT cutoff, DuckDB returns whichever it scanned first,
+# so the digest — the model's entire world, and part of the evaluation cache
+# key — changes between two calls on unchanged data. Measured on the live zone:
+# six builds of DM-K/10340 gave 5 different top_swims (three swimmers tie on
+# 845), and DM-L/10334 alternated its last row between two swimmers on 779.
+# The cost is a silently invalidated cache entry (a paid regeneration), a
+# published report naming a swimmer the next build drops, and false positives
+# in any check that compares published text against a fresh digest.
 # params: category, meet_id
 _TOP_SWIMS_SQL = f"""
     SELECT name, club, event, completed_time AS time, points, rank
@@ -119,7 +129,7 @@ _TOP_SWIMS_SQL = f"""
     QUALIFY row_number() OVER (
         PARTITION BY swimmer_id, gender, distance, stroke, course
         ORDER BY points DESC) = 1
-    ORDER BY points DESC LIMIT {TOP_N}
+    ORDER BY points DESC, name, distance, stroke, gender LIMIT {TOP_N}
 """
 
 # params: meet_id
@@ -134,7 +144,7 @@ _JUNIOR_TOP_SWIMS_SQL = f"""
     QUALIFY row_number() OVER (
         PARTITION BY swimmer_id, gender, distance, stroke, course
         ORDER BY points DESC) = 1
-    ORDER BY points DESC LIMIT {TOP_N}
+    ORDER BY points DESC, name, distance, stroke, gender LIMIT {TOP_N}
 """
 
 # median points this season vs the mean of the prior seasons in the window.
