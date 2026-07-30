@@ -314,9 +314,19 @@ def _prompt(digest_json: str, offenders: set[str] | None = None,
     return head
 
 
-def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> list[dict]:
+def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> list[dict]:
     """digest -> [{heading, body}, ...]. Raises EvaluationError if the number
     check still fails after `retries` rewrites, or if the guardrail intervenes.
+
+    `retries` is 3 because the grounding verdict is not a property of the meet:
+    the same digest's sections scored 0.38 and 0.83 on two runs, and two 11-meet
+    batches lost a *different* pair of meets each. At one retry a batch left
+    ~5% of meets with no report, and the meets it dropped were not the ones with
+    thin data — they were the unlucky ones. Re-rolling is the cheap fix (an
+    attempt is ~4k tokens; prompt wording is not, and tightening it to fight the
+    threshold made things worse: a stricter section split scored *better* on the
+    section it targeted and pushed the block onto a neighbouring section, 4
+    refusals in 11 meets).
 
     `guard` is required, not optional: a caller that reaches here without one
     would publish unguarded prose about named minors, which is a bug in the
@@ -328,14 +338,22 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> li
     # enforced here, not assumed: a batch caller reusing one Agent across
     # meets would otherwise carry meet A's history into meet B's prompt, and
     # check_numbers screens numbers only — a leaked name would pass.
+    #
+    # Cleared before *every* attempt, not once per meet: strands appends each
+    # answer to agent.messages, so a retry would otherwise resend the rejected
+    # prose as input, where the Converse call's inline guardrail assesses it and
+    # blocks the whole meet — a failure evaluate() does not retry. That cost 5
+    # meets of a 41-meet batch, all of them meets that only needed a re-roll.
+    # `_prompt` restates the digest and the complaint, so an empty conversation
+    # loses nothing (and keeps input cost flat across attempts).
     messages = getattr(agent, "messages", None)
-    if messages is not None:
-        messages.clear()
 
     digest_json = canonical_json(digest)
     offenders: set[str] = set()
     blocked: str | None = None
     for attempt in range(retries + 1):
+        if messages is not None:
+            messages.clear()
         result = agent(_prompt(digest_json,
                                offenders if attempt else None,
                                blocked if attempt else None),
@@ -371,6 +389,6 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 1) -> li
     if blocked:
         raise EvaluationError(
             f"the guardrail blocked the section {blocked!r} after "
-            f"{retries} retry")
+            f"{retries + 1} attempts")
     raise EvaluationError(
-        f"numbers not in digest after {retries} retry: {sorted(offenders)}")
+        f"numbers not in digest after {retries + 1} attempts: {sorted(offenders)}")

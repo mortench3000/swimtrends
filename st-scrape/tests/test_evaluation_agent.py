@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import json
 
 import boto3
@@ -98,8 +99,58 @@ def test_evaluate_retries_once_when_a_number_is_fabricated():
 def test_evaluate_raises_when_the_retry_also_fabricates():
     fake = FakeAgent(_sections("777 point."), _sections("888 point."))
     with pytest.raises(ag.EvaluationError) as e:
-        ag.evaluate(DIGEST, agent=fake, guard=_guard())
+        ag.evaluate(DIGEST, agent=fake, guard=_guard(), retries=1)
     assert "888" in str(e.value)
+
+
+def test_a_blocked_section_is_re_rolled_up_to_retries_times():
+    """The guardrail's verdict on a correct report is not deterministic: the
+    same meet's sections scored 0.38 and 0.83 on two runs, and a batch lost a
+    different pair of meets each time. Re-rolling is what recovers them —
+    measured, both meets a run had refused passed on a later attempt."""
+    client = FakeGuardrailClient()
+    client.action_for = {"tredje": "GUARDRAIL_INTERVENED"}
+    guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3",
+                           client=client)
+    blocked = [{"heading": h, "body": b} for h, b in
+               zip(ag.HEADINGS, ["612 point.", "612 point.",
+                                 "612 point i tredje.", "612 point."])]
+    fake = FakeAgent(blocked, [dict(s) for s in blocked], _sections("612 point."))
+    out = ag.evaluate(DIGEST, agent=fake, guard=guard, retries=2)
+    assert len(fake.prompts) == 3            # two blocks, then a clean one
+    assert "612 point." in out[0]["body"]
+
+
+def test_each_attempt_starts_from_an_empty_conversation():
+    """A retry must not resend the previous attempt's prose as input.
+
+    Strands appends each answer to agent.messages, so attempt 2 carries
+    attempt 1's rejected text into the *input* of the next Converse call — where
+    the inline guardrail assesses it and blocks the whole meet ("the guardrail
+    blocked the Converse call"), which evaluate() does not retry. A 41-meet
+    batch lost 5 meets that way, all of them meets that had merely needed a
+    re-roll. `_prompt` already restates the digest and the complaint, so the
+    history carries nothing but the liability — and the resent conversation is
+    also what makes input cost grow per attempt.
+    """
+    seen = []
+
+    class RecordingAgent(FakeAgent):
+        def __call__(self, prompt, **kwargs):
+            seen.append(list(self.messages))
+            self.messages.append({"role": "assistant", "content": "previous answer"})
+            return super().__call__(prompt, **kwargs)
+
+    fake = RecordingAgent(_sections("777 point."), _sections("612 point."))
+    ag.evaluate(DIGEST, agent=fake, guard=_guard())
+    assert len(seen) == 2
+    assert seen[1] == [], "the retry saw the previous attempt's conversation"
+
+
+def test_evaluate_default_allows_more_than_one_re_roll():
+    """A single retry left ~5% of meets unpublished per batch. Pinning the
+    default here so it cannot silently drift back to one."""
+    assert inspect.signature(ag.evaluate).parameters["retries"].default >= 2
 
 
 def test_evaluate_does_not_carry_history_between_meets():
@@ -224,7 +275,7 @@ def test_a_block_names_the_offending_section():
     report = [{"heading": h, "body": b} for h, b in zip(ag.HEADINGS, bodies)]
     fake = FakeAgent(report, [dict(s) for s in report])   # the retry offends too
     with pytest.raises(ag.EvaluationError, match=ag.HEADINGS[2]):
-        ag.evaluate(DIGEST, agent=fake, guard=guard)
+        ag.evaluate(DIGEST, agent=fake, guard=guard, retries=1)
     # Each attempt stops at the first blocked section rather than paying for
     # the rest: 3 calls, then the retry's 3.
     assert len(client.calls) == 6
@@ -234,7 +285,7 @@ def test_evaluate_raises_when_the_output_guardrail_intervenes():
     guard = _guard("GUARDRAIL_INTERVENED")
     fake = FakeAgent(_sections("612 point."), _sections("612 point."))
     with pytest.raises(ag.EvaluationError, match="guardrail"):
-        ag.evaluate(DIGEST, agent=fake, guard=guard)
+        ag.evaluate(DIGEST, agent=fake, guard=guard, retries=1)
 
 
 def test_a_guardrail_block_is_retried_like_a_bad_number():
@@ -288,7 +339,7 @@ def test_evaluate_never_guards_a_report_that_fails_the_number_check():
     guard = _guard()
     fake = FakeAgent(_sections("777 point."), _sections("888 point."))
     with pytest.raises(ag.EvaluationError):
-        ag.evaluate(DIGEST, agent=fake, guard=guard)
+        ag.evaluate(DIGEST, agent=fake, guard=guard, retries=1)
     assert guard.client.calls == []
 
 
