@@ -63,9 +63,42 @@ web-refresh: eval-preflight
 
 # Fill the evaluation cache and emit evaluation.json (seconds on a cache hit).
 # Needs no exports — EVAL_* above resolve the model + live guardrail version.
-# Does NOT sync; web-refresh does that.
+# Does NOT sync; web-eval-deploy and web-refresh do that.
 web-eval: eval-preflight
 	cd st-scrape && $(EVAL_ENV) $(ST_PYTHON) -m evaluation --out ../web/public/data
+
+# Publish the evaluations WITHOUT rebuilding the data JSON — the right target
+# when only the reports changed (a prompt edit, a new check, a re-roll of a
+# refused meet). web-refresh would do this too, but it pays webbuild's ~50
+# minutes first to regenerate files that are already correct.
+#
+# Two hazards, both learned the hard way:
+#   * NO `--delete`. This is a partial sync: --delete would remove every race
+#     and meet JSON in the bucket that the --include does not match. web-refresh
+#     may use it only because it syncs the whole directory.
+#   * Don't read the upload list as "what changed". web-eval rewrites all 41
+#     files every run, cache hits included, so sync sees fresh mtimes and
+#     re-uploads the lot (~80 KB — cheap, just not informative). The same
+#     mtime blindness once made `sync --dryrun` claim 1698 race and meet files
+#     needed uploading when their content already matched the S3 ETag byte for
+#     byte. Use web-eval-verify, which compares md5 against the ETag.
+web-eval-deploy: web-eval
+	aws s3 sync web/public/data s3://$(WEB_BUCKET)/data/ \
+		--exclude "*" --include "*/evaluation.json" --profile swimtrends
+	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) \
+		--paths "/data/*" --profile swimtrends
+
+# Confirm every local evaluation.json matches the object now served, by content
+# hash rather than by mtime. Prints nothing and exits 0 when they all agree.
+web-eval-verify:
+	@bad=0; for f in web/public/data/*/*/evaluation.json; do \
+	  k=$${f#web/public/data/}; \
+	  l=$$(md5sum "$$f" | cut -d' ' -f1); \
+	  r=$$(aws s3api head-object --bucket $(WEB_BUCKET) --key "data/$$k" \
+	       --profile swimtrends --query ETag --output text 2>/dev/null | tr -d '"'); \
+	  [ "$$l" = "$$r" ] || { echo "DIFFERS: $$k"; bad=$$((bad+1)); }; \
+	done; \
+	echo "evaluation.json mismatches: $$bad"; [ $$bad -eq 0 ]
 
 # Full web release: run the SPA unit tests, then build+deploy the app, then
 # refresh the data. Stops at the first failure. (webbuild breakage surfaces in
@@ -83,4 +116,5 @@ eval-models: eval-preflight
 	cd st-scrape && $(EVAL_ENV) $(ST_PYTHON) -m evaluation.compare \
 		--meets $(MEETS) --models $(MODELS)
 
-.PHONY: web-dev web-deploy web-refresh eval-preflight web-eval web-release eval-models
+.PHONY: web-dev web-deploy web-refresh eval-preflight web-eval web-eval-deploy \
+	web-eval-verify web-release eval-models

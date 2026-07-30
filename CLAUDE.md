@@ -195,7 +195,9 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
   a change alters the generated JSON. Note: `web-refresh` is **slow (~50 min)** —
   `webbuild` reads the whole curated zone from S3 one race at a time and is
   **silent until the final `wrote N files`** (gauge progress by output-file
-  mtimes, not the file count, which is stable across rebuilds).
+  mtimes, not the file count, which is stable across rebuilds). When only the
+  AI reports changed, use **`make web-eval-deploy`** instead (seconds: it syncs
+  just `*/evaluation.json`), and confirm with `make web-eval-verify`.
 - Still confirm before other hard-to-reverse or outward-facing actions: **CDK
   stack deploys** (infra), raw-zone S3 overwrites, and force-dispatch of the
   whole registry.
