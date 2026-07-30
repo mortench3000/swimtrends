@@ -1,4 +1,5 @@
-from tests.evaluation_fixtures import digest_con, gapped_digest_con, junior_digest_con
+from tests.evaluation_fixtures import (digest_con, gapped_digest_con,
+                                       junior_digest_con, tied_points_con)
 from tests.webbuild_fixtures import relay_con
 from webbuild import digest, queries
 
@@ -146,3 +147,26 @@ def test_junior_path_top_swims_and_by_stroke_report_juniors_only():
     assert names and all(n.startswith("Junior") for n in names)   # no seniors
     assert all(s["rank"] >= 1 for s in d["top_swims"])             # junior_rank
     assert [r["stroke"] for r in d["by_stroke"]] == ["Fri"]
+
+
+def test_top_swims_are_deterministic_when_points_tie_at_the_cutoff():
+    """`ORDER BY points DESC LIMIT TOP_N` alone is not a total order, so when
+    several swims tie on points at the cutoff DuckDB may return any of them —
+    and it does. Measured against the live curated zone: six consecutive builds
+    of DM-K/10340 produced 5 different top_swims (845 is shared by three
+    swimmers), and DM-L/10334 flipped its last row between Karoline Sørensen
+    and Emilie Beckmann, both on 779.
+
+    That is not cosmetic. The digest is part of the evaluation cache key, so a
+    flip silently invalidates a cached report and pays to regenerate it; the
+    published text can name a swimmer the next build drops; and any checker
+    comparing published prose against a fresh digest reports phantom errors
+    (this cost three false positives in evaluation/check.py).
+    """
+    con = tied_points_con()
+    builds = [digest.build(con, "DM-L", "T2026") for _ in range(6)]
+    first = builds[0]["top_swims"]
+    assert all(b["top_swims"] == first for b in builds), "top_swims is unstable"
+    # And the tie is broken on a documented key, not on scan order.
+    tied = [s["name"] for s in first if s["points"] == 500]
+    assert tied == sorted(tied)

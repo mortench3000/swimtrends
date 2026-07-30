@@ -131,3 +131,35 @@ def junior_digest_con() -> duckdb.DuckDBPyConnection:
     build_curated(con, obt=obt, meets=meets, splits=[])
     create_views(con)
     return con
+
+
+def tied_points_con() -> duckdb.DuckDBPyConnection:
+    """One meet where many swims tie on points across the top-N cutoff.
+
+    digest.TOP_N is 10; this builds 16 scoring swims of which 12 sit on exactly
+    500 points, so the cutoff falls inside the tie and any non-total ordering
+    can return a different set of rows per call — which is what the live zone
+    does. Distinct swimmers and events, so the tie-break has something to sort
+    on.
+    """
+    obt, meets = [], []
+    mid, season, mdate = "T2026", 2026, "2026-04-10"
+    meets.append(dict(meet_id=mid, meet_name="Tied Champs 2026", venue="Aarhus",
+                      course="LCM", season=season, meet_date=mdate,
+                      category=["DM-L"]))
+    # 4 clearly-above-the-tie swims, then 12 all on 500.
+    field = [(f"hi{i}", f"Alpha {i}", 900 - i) for i in range(4)]
+    field += [(f"tie{i:02d}", f"Tied Swimmer {i:02d}", 500) for i in range(12)]
+    for rid, (sid, sname, pts) in enumerate(field, 1):
+        gender, distance, stroke = _EVENTS[rid % len(_EVENTS)]
+        obt.append(_row(
+            result_id=f"{mid}-{rid}", race_id=rid, meet_id=mid, rank=1,
+            name=sname, swimmer_id=sid, club="AGF",
+            completed_time=_time(6000 + rid), completed_centiseconds=6000 + rid,
+            points=pts, points_fixed=pts, season=season,
+            meet_name="Tied Champs 2026", meet_date=mdate,
+            distance=distance, stroke=stroke, gender=gender, type="Final"))
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets)
+    create_views(con)
+    return con
