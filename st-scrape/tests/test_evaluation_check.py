@@ -121,6 +121,19 @@ def test_near_miss_sprint_time_is_still_caught():
     assert check.check_numbers("Han svømmede 24.67.", d) == {"24.67"}
 
 
+def test_club_name_digits_are_licensed():
+    """Danish club names carry digits ("MK31", "A6 JGI-Swim"). The model names
+    the swimmer's club because the prompt licenses it, so those digits are not
+    fabrications — and flagging them burns the one rewrite the meet gets, which
+    is what left DM-K/7088 unpublished."""
+    d = {**DIGEST, "top_swims": [{"name": "Ida Møller", "club": "Svømmeklubben MK31",
+                                  "event": "F 50m Fri (LCM)", "time": "24.66",
+                                  "points": 700, "rank": 1}]}
+    assert check.check_numbers("Ida Møller fra Svømmeklubben MK31 vandt.", d) == set()
+    # A club's digits license only themselves — not arithmetic built from them.
+    assert check.check_numbers("Klubben vandt 311 gange.", d) == {"311"}
+
+
 def test_meet_name_year_is_licensed():
     """meet.name is the meet's own displayed title (e.g. "DM Kortbane 2016")
     — a model naturally quotes it, so its digits must be licensed."""

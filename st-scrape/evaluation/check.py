@@ -83,6 +83,16 @@ def allowed_numbers(digest: dict) -> set[str]:
     name = digest.get("meet", {}).get("name")
     if isinstance(name, str):
         out.update(re.findall(r"\d+", name))
+    # Club names carry digits — "Svømmeklubben MK31", "A6 JGI-Swim". The prompt
+    # licenses naming a swimmer's club, so those digits arrive in the prose by
+    # design; flagging them as fabricated spends the meet's single rewrite on a
+    # false positive (this is what left DM-K/7088 unpublished). Only top_swims
+    # clubs, and only the digit runs as written — the rest of the digest's free
+    # text stays unlicensed, which is the leak _walk deliberately avoids.
+    for swim in digest.get("top_swims", []):
+        club = swim.get("club") if isinstance(swim, dict) else None
+        if isinstance(club, str):
+            out.update(re.findall(r"\d+", club))
     return out
 
 
