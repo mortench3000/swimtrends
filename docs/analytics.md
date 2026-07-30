@@ -161,6 +161,15 @@ offline and cached. `make web-eval` fills the cache and writes
 `web/public/data/<cat>/<meet>/evaluation.json`; `make web-refresh` runs it
 between `webbuild` and the S3 sync.
 
+**To publish reports and nothing else, use `make web-eval-deploy`** — it runs
+`web-eval`, syncs only `*/evaluation.json`, and invalidates `/data/*`. That is
+the target for a prompt edit, a new check, or a re-roll of a refused meet.
+`web-refresh` would also publish them, but it rebuilds the whole data zone
+first (~50 minutes) to regenerate files that are already correct. Confirm with
+`make web-eval-verify`, which compares each local file's md5 against the served
+object's ETag: the sync's upload list is *not* a record of what changed,
+because `web-eval` rewrites all 41 files every run and sync compares mtimes.
+
 This step needs `strands-agents` and `pydantic`, which live in
 `st-scrape/requirements-eval.txt` rather than `requirements.txt` — the Fargate
 images install the latter and import neither. `requirements-dev.txt` pulls the
