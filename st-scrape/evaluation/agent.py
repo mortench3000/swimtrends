@@ -22,7 +22,7 @@ from strands import Agent
 from strands.models import BedrockModel
 
 from evaluation.cache import canonical_json
-from evaluation.check import check_numbers
+from evaluation.check import check_genders, check_numbers
 
 log = logging.getLogger("evaluation")
 
@@ -292,13 +292,23 @@ class OutputGuard:
 
 
 def _prompt(digest_json: str, offenders: set[str] | None = None,
-            blocked: str | None = None) -> str:
+            blocked: str | None = None, wrong_gender: set[str] | None = None) -> str:
     head = f"<digest>{digest_json}</digest>"
     if offenders:
         bad = ", ".join(sorted(offenders))
         return (f"{head}\n"
                 f"Your previous answer contained numbers that are not in the digest: "
                 f"{bad}. Rewrite the evaluation using only numbers from the digest.")
+    if wrong_gender:
+        # Name the offending phrase: the model wrote the opposite of a marker it
+        # was given, so pointing at the event alone would not show it the flip.
+        bad = ", ".join(sorted(wrong_gender))
+        return (f"{head}\n"
+                f"Your previous answer described these events with the wrong "
+                f"gender: {bad}. Every event in digest.top_swims carries its "
+                f"gender as the first character (\"F 50m Ryg (LCM)\" is a "
+                f"women's race, \"M 50m Ryg (LCM)\" a men's). Rewrite the "
+                f"evaluation and take each event's gender from that marker.")
     if blocked:
         # The model cannot see the guardrail's verdict, so name the section and
         # the offence. Grounding is what fails here in practice: a section that
@@ -350,13 +360,15 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
 
     digest_json = canonical_json(digest)
     offenders: set[str] = set()
+    wrong_gender: set[str] = set()
     blocked: str | None = None
     for attempt in range(retries + 1):
         if messages is not None:
             messages.clear()
         result = agent(_prompt(digest_json,
                                offenders if attempt else None,
-                               blocked if attempt else None),
+                               blocked if attempt else None,
+                               wrong_gender if attempt else None),
                        structured_output_model=MeetEvaluation,
                        limits=LIMITS)
         # A block is a failure, not a fallback — and it must be detected
@@ -379,13 +391,22 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
             raise EvaluationError("the model returned no structured output")
         text = "\n".join(s.body for s in report.sections)
         offenders = check_numbers(text, digest)
-        if not offenders:
+        # Checked before the guardrail for the same reason the number check is:
+        # a rewrite is cheaper than an ApplyGuardrail call per section, and the
+        # guardrail would pass this text anyway (0.88 grounding on the real
+        # DM-L/9775 sentence, four hundredths below the corrected version).
+        wrong_gender = check_genders(text, digest)
+        if not offenders and not wrong_gender:
             sections = [{"heading": s.heading, "body": s.body}
                         for s in report.sections]
             # Last gate before the caller caches and publishes this text.
             blocked = guard.check(sections, digest_json)
             if blocked is None:
                 return sections
+    if wrong_gender:
+        raise EvaluationError(
+            f"wrong gender on {sorted(wrong_gender)} after "
+            f"{retries + 1} attempts")
     if blocked:
         raise EvaluationError(
             f"the guardrail blocked the section {blocked!r} after "

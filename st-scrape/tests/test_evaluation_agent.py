@@ -592,3 +592,29 @@ def test_evaluate_raises_when_the_token_budget_stops_the_loop():
     with pytest.raises(ag.EvaluationError, match="token budget"):
         ag.evaluate(DIGEST, agent=fake, guard=_guard())
     assert len(fake.prompts) == 1     # a budget trip is not retried: retrying pays again
+
+
+def test_a_wrong_gendered_event_is_rewritten_before_publishing():
+    """DM-L/9775 published "Pauline Mahieu ... vandt herrernes 50m Ryg" against
+    a digest row reading "F 50m Ryg (LCM)". check_numbers cannot see it (every
+    figure was right) and the guardrail barely can — measured on that section,
+    0.88 grounding as published against 0.92 with only the gender corrected. So
+    the deterministic check has to gate it, like a fabricated number does."""
+    d = {**DIGEST, "top_swims": [{"name": "Pauline Mahieu", "club": "Frankrig",
+                                  "event": "F 50m Ryg (LCM)", "time": "28.50",
+                                  "points": 848, "rank": 1}]}
+    fake = FakeAgent(_sections("Hun vandt herrernes 50m Ryg."),   # wrong gender
+                     _sections("Hun vandt damernes 50m Ryg."))    # fixed
+    out = ag.evaluate(d, agent=fake, guard=_guard())
+    assert len(fake.prompts) == 2
+    assert "herrernes 50m Ryg" in fake.prompts[1]     # the flip is quoted back
+    assert "damernes" in out[0]["body"]
+
+
+def test_a_wrong_gendered_event_that_survives_every_retry_raises():
+    d = {**DIGEST, "top_swims": [{"name": "Pauline Mahieu", "club": "Frankrig",
+                                  "event": "F 50m Ryg (LCM)", "time": "28.50",
+                                  "points": 848, "rank": 1}]}
+    fake = FakeAgent(*[_sections("Hun vandt herrernes 50m Ryg.") for _ in range(2)])
+    with pytest.raises(ag.EvaluationError, match="gender"):
+        ag.evaluate(d, agent=fake, guard=_guard(), retries=1)

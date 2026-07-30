@@ -139,3 +139,56 @@ def test_meet_name_year_is_licensed():
     — a model naturally quotes it, so its digits must be licensed."""
     d = {**DIGEST, "meet": {**DIGEST["meet"], "name": "DM Kortbane 2016"}}
     assert check.check_numbers("Rekorden faldt ved DM Kortbane 2016.", d) == set()
+
+
+# --- check_genders -----------------------------------------------------------
+# A gendered event claim is a factual statement about a named athlete that no
+# other gate can see: check_numbers inspects numeric tokens only, and the
+# guardrail scores a whole section, where one wrong word costs almost nothing.
+# Measured on the real DM-L/9775 report: "herrernes 50m Ryg" for an F event
+# scored 0.88 grounding, against 0.92 for the same text with the gender fixed.
+
+def _swim(event):
+    return {"name": "X", "club": "AGF", "event": event, "time": "28.50",
+            "points": 848, "rank": 1}
+
+
+def test_gendered_claim_contradicting_the_digest_is_caught():
+    """The published DM-L/9775 sentence, verbatim in shape: the digest offers
+    only F 50m Ryg and the report called it a men's race."""
+    d = {**DIGEST, "top_swims": [_swim("F 50m Ryg (LCM)")]}
+    assert check.check_genders(
+        "Pauline Mahieu vandt herrernes 50m Ryg med 848 point.", d) == {
+            "herrernes 50m Ryg"}
+
+
+def test_gendered_claim_matching_the_digest_passes():
+    d = {**DIGEST, "top_swims": [_swim("F 50m Ryg (LCM)")]}
+    assert check.check_genders("Hun vandt damernes 50m Ryg.", d) == set()
+
+
+def test_the_raw_marker_form_is_checked_too():
+    """Rule 9 lets the model write the digest's own "M 50m Ryg" instead of
+    "herrernes", so a gate that only reads the Danish words is half a gate."""
+    d = {**DIGEST, "top_swims": [_swim("F 50m Ryg (LCM)")]}
+    assert check.check_genders("Vinderen tog M 50m Ryg.", d) == {"M 50m Ryg"}
+    assert check.check_genders("Vinderen tog F 50m Ryg.", d) == set()
+
+
+def test_an_event_held_for_both_genders_licenses_either():
+    d = {**DIGEST, "top_swims": [_swim("F 50m Ryg (LCM)"), _swim("M 50m Ryg (LCM)")]}
+    assert check.check_genders("herrernes 50m Ryg og damernes 50m Ryg", d) == set()
+
+
+def test_an_event_absent_from_the_digest_is_not_this_check_s_business():
+    """top_swims is a top-N list, so most of a meet's events are missing from
+    it. Flagging those would reject correct prose about a race the digest
+    simply doesn't carry — a different problem than a contradicted marker."""
+    d = {**DIGEST, "top_swims": [_swim("F 50m Ryg (LCM)")]}
+    assert check.check_genders("herrernes 1500m Fri var tæt.", d) == set()
+
+
+def test_prose_without_a_gendered_event_claim_is_clean():
+    d = {**DIGEST, "top_swims": [_swim("F 50m Ryg (LCM)")]}
+    assert check.check_genders("Blandt herrerne var niveauet højt.", d) == set()
+    assert check.check_genders("Medianen faldt 12 point.", d) == set()

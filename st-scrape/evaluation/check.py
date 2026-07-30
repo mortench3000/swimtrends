@@ -112,3 +112,70 @@ def numbers_in_text(text: str) -> set[str]:
 def check_numbers(text: str, digest: dict) -> set[str]:
     """The numeric tokens in `text` that the digest does not license."""
     return numbers_in_text(text) - allowed_numbers(digest)
+
+
+# --- gendered event claims ---------------------------------------------------
+# Men's and women's races share a name, so digest.top_swims[].event carries a
+# marker ("F 50m Ryg (LCM)") and SYSTEM_PROMPT rule 9 tells the model to carry
+# it into the prose. Nothing enforced that until now, and the model can state
+# the opposite of what the digest says: DM-L/9775 published "Pauline Mahieu ...
+# vandt herrernes 50m Ryg" against a digest row reading F.
+#
+# Neither existing gate can see it. check_numbers reads numeric tokens, and
+# every figure in that sentence was right. The guardrail scores a whole section,
+# where one inverted word is lost in a paragraph of correct times and points —
+# measured on that exact section: 0.88 grounding as published, 0.92 with only
+# the gender corrected. A 0.04 cost for a factual claim about a named athlete is
+# not a gate, so this check is deterministic instead.
+
+# The Danish forms the reports actually use, plus the digest's own raw markers
+# (rule 9 permits either). Longest first so "herrernes" is not matched as
+# "herrer".
+_GENDER_WORDS = {
+    "herrernes": "M", "herrerne": "M", "herrer": "M",
+    "mændenes": "M", "mændene": "M",
+    "damernes": "F", "damerne": "F", "damer": "F",
+    "kvindernes": "F", "kvinderne": "F", "kvinder": "F",
+    "m": "M", "f": "F",
+}
+_STROKES = "Fri|Ryg|Bryst|Fly|IM|HM"
+# A gender token, then a distance+stroke close behind it. `[^.]` keeps a match
+# inside one sentence: "Blandt herrerne var niveauet højt. Hun vandt 50m Ryg"
+# must not read as a claim about a men's race. (A decimal point ends the window
+# early, which only ever costs a match — it never invents one.)
+_CLAIM = re.compile(
+    rf"\b({'|'.join(_GENDER_WORDS)})\b[^.]{{0,40}}?\b([\dx]+)m\s+({_STROKES})\b",
+    re.IGNORECASE)
+# The same shape on the digest side: "F 50m Ryg (LCM)".
+_EVENT = re.compile(rf"^([MFX])\s+([\dx]+)m\s+({_STROKES})\b", re.IGNORECASE)
+
+
+def genders_in_digest(digest: dict) -> dict[tuple[str, str], set[str]]:
+    """(distance, stroke) -> the genders digest.top_swims actually holds."""
+    out: dict[tuple[str, str], set[str]] = {}
+    for swim in digest.get("top_swims", []):
+        if not isinstance(swim, dict):
+            continue
+        m = _EVENT.match(str(swim.get("event") or ""))
+        if m:
+            out.setdefault((m.group(2).lower(), m.group(3).lower()),
+                           set()).add(m.group(1).upper())
+    return out
+
+
+def check_genders(text: str, digest: dict) -> set[str]:
+    """Gendered event claims in `text` that contradict the digest.
+
+    Only claims about an event the digest actually carries are judged. top_swims
+    is a top-N list, so most of a meet's races are absent from it, and treating
+    "absent" as "wrong" would reject correct prose. An event held for both
+    genders licenses either — that is not a contradiction, just a shared name.
+    """
+    held = genders_in_digest(digest)
+    offenders = set()
+    for word, distance, stroke in _CLAIM.findall(text or ""):
+        claimed = _GENDER_WORDS[word.lower()]
+        offered = held.get((distance.lower(), stroke.lower()))
+        if offered and claimed not in offered:
+            offenders.add(f"{word} {distance}m {stroke}")
+    return offenders
