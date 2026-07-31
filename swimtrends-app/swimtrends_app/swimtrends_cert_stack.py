@@ -16,8 +16,13 @@ class SwimtrendsCertStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
         zone = route53.HostedZone.from_hosted_zone_attributes(
             self, "Zone", hosted_zone_id=HOSTED_ZONE_ID, zone_name=DOMAIN)
+        # CloudFront only serves an alias its viewer certificate covers, so the
+        # www alias on the distribution depends on this SAN. Adding or removing
+        # it REPLACES the certificate (new ACM cert, new DNS validation record,
+        # then the distribution is repointed) — safe, but not a no-op edit.
         self.certificate = acm.Certificate(
             self, "SiteCert",
             domain_name=DOMAIN,
+            subject_alternative_names=[f"www.{DOMAIN}"],
             validation=acm.CertificateValidation.from_dns(zone),
         )

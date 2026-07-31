@@ -14,7 +14,7 @@ registry + dispatcher Lambda + Fargate scraper, hourly EventBridge cycle).
 | --- | --- |
 | `st-scrape/` | **The application.** `scrape_races.py` (scraper), `curate/` (raw→Parquet transform), `analytics/` (DuckDB views + loader), `ingestion/` (registry, dispatcher, `cli.py`), `webbuild/` (curated→SPA JSON + `digest.py`), `evaluation/` (AI meet reports: agent, S3 cache, number check), `gen_base_times.py`, `tests/`, `notebooks/`. |
 | `web/` | The **SPA** (Svelte 5 + Vite). Real path routes (`/<cat>/<meetId>/<raceKey>`), `prerender.mjs` post-build step, `src/lib/seo.js` shared with it. |
-| `swimtrends-app/` | AWS **CDK infrastructure** (Python): S3, DynamoDB, dispatcher/curate Lambdas, Fargate task defs, SNS, Glue. Stacks in `swimtrends_app/*_stack.py`; tests in `tests/unit`; `cloudfront/append_index.js` viewer function. |
+| `swimtrends-app/` | AWS **CDK infrastructure** (Python): S3, DynamoDB, dispatcher/curate Lambdas, Fargate task defs, SNS, Glue. Stacks in `swimtrends_app/*_stack.py`; tests in `tests/unit`; `cloudfront/viewer_request.js` viewer function. |
 | `docs/` | [`analytics.md`](docs/analytics.md) (querying), [`ingestion.md`](docs/ingestion.md) (operational CLI), design specs/plans under `superpowers/`. |
 | `legacy/` | Deprecated original Scrapy → PostgreSQL pipeline + Docker. Not maintained. See [`legacy/README.md`](legacy/README.md). Don't build on it. |
 
@@ -162,10 +162,12 @@ npx aws-cdk@2.1133.0 deploy SwimtrendsIngestionStack \
     is gitignored and CI has no local copy. A fetch failure **must** fail the
     build — `web-deploy` syncs `--delete`, so prerendering nothing would delete
     the good pages. Override the source with `SEO_DATA_BASE`.
-  * `cloudfront/append_index.js` (viewer-request) is what makes those shells
+  * `cloudfront/viewer_request.js` (viewer-request) is what makes those shells
     reachable: the S3 REST/OAC origin has no directory index, so without it every
     prerendered page 404s into the SPA fallback and silently serves the generic
-    shell. Its 11-URI table test runs the real function body through `node`.
+    shell. It also 301s `www` to the apex — **`swimtrends.dk` is the one canonical
+    host**, and the ACM cert's `www` SAN is what allows that alias, so removing
+    the SAN breaks www. Its table tests run the real function body through `node`.
   * `main.js` clears `#app` before `mount()` — Svelte 5 `mount()` appends, so the
     static shell would otherwise remain under the hydrated app.
 - **AI evaluations**: meet pages can carry a batch-generated Danish coach report
