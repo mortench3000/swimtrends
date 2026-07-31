@@ -15,6 +15,7 @@ from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 DOMAIN = "swimtrends.dk"
+WWW = f"www.{DOMAIN}"  # aliased, but 301s to the apex (cloudfront/viewer_request.js)
 HOSTED_ZONE_ID = "Z05943842L8KIUA914B4J"
 GITHUB_OIDC_URL = "https://token.actions.githubusercontent.com"
 GITHUB_REPO = "mortench3000/swimtrends"
@@ -44,27 +45,27 @@ class SwimtrendsWebStack(Stack):
             for code in (403, 404)
         ]
 
-        # Without this, the prerendered pages (web/prerender.mjs) are unreachable
-        # — see cloudfront/append_index.js.
-        append_index = cloudfront.Function(
-            self, "AppendIndex",
+        # Redirects www to the apex, and makes the prerendered pages
+        # (web/prerender.mjs) reachable at all — see cloudfront/viewer_request.js.
+        viewer_request = cloudfront.Function(
+            self, "ViewerRequest",
             code=cloudfront.FunctionCode.from_file(
-                file_path=str(Path(__file__).parents[1] / "cloudfront" / "append_index.js")),
+                file_path=str(Path(__file__).parents[1] / "cloudfront" / "viewer_request.js")),
             runtime=cloudfront.FunctionRuntime.JS_2_0,
-            comment="Append /index.html to extensionless paths (S3 OAC has no directory index)",
+            comment="301 www->apex; append /index.html to extensionless paths",
         )
 
         distribution = cloudfront.Distribution(
             self, "Distribution",
             default_root_object="index.html",
-            domain_names=[DOMAIN],
+            domain_names=[DOMAIN, WWW],
             certificate=certificate,
             default_behavior=cloudfront.BehaviorOptions(
                 origin=origins.S3BucketOrigin.with_origin_access_control(bucket),
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
                 cache_policy=cloudfront.CachePolicy.CACHING_OPTIMIZED,
                 function_associations=[cloudfront.FunctionAssociation(
-                    function=append_index,
+                    function=viewer_request,
                     event_type=cloudfront.FunctionEventType.VIEWER_REQUEST)],
             ),
             error_responses=spa_fallback,
@@ -77,6 +78,9 @@ class SwimtrendsWebStack(Stack):
             targets.CloudFrontTarget(distribution))
         route53.ARecord(self, "AliasA", zone=zone, target=alias, record_name=DOMAIN)
         route53.AaaaRecord(self, "AliasAAAA", zone=zone, target=alias, record_name=DOMAIN)
+        # www resolves to the same distribution purely so the function can 301 it.
+        route53.ARecord(self, "WwwAliasA", zone=zone, target=alias, record_name=WWW)
+        route53.AaaaRecord(self, "WwwAliasAAAA", zone=zone, target=alias, record_name=WWW)
 
         # GitHub Actions deploys the SPA on merge to master. OIDC, so no
         # long-lived access keys live in GitHub. The sub condition is the

@@ -39,7 +39,7 @@ def test_distribution_has_domain_and_spa_fallback():
     t = _template()
     t.has_resource_properties("AWS::CloudFront::Distribution", {
         "DistributionConfig": assertions.Match.object_like({
-            "Aliases": ["swimtrends.dk"],
+            "Aliases": ["swimtrends.dk", "www.swimtrends.dk"],
             "DefaultRootObject": "index.html",
         })
     })
@@ -63,14 +63,20 @@ def test_viewer_function_is_associated_with_the_default_behavior():
 # prerendered page 404s into the SPA fallback and serves the *generic* shell —
 # silently, which is the bug this whole change exists to fix. Run the real
 # function body through node rather than trusting it by inspection.
-FUNC_JS = pathlib.Path(__file__).resolve().parents[2] / "cloudfront" / "append_index.js"
+FUNC_JS = pathlib.Path(__file__).resolve().parents[2] / "cloudfront" / "viewer_request.js"
+
+
+def _call(uri: str, host: str = "swimtrends.dk") -> dict:
+    """Run the real function body and return its result (a request or a response)."""
+    event = {"request": {"uri": uri, "headers": {"host": {"value": host}}}}
+    script = FUNC_JS.read_text() + (
+        f"\nprocess.stdout.write(JSON.stringify(handler({json.dumps(event)})))")
+    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
+    return json.loads(out.stdout)
 
 
 def _rewrite(uri: str) -> str:
-    script = FUNC_JS.read_text() + (
-        f"\nprocess.stdout.write(handler({{request:{{uri:{json.dumps(uri)}}}}}).uri)")
-    out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
-    return out.stdout
+    return _call(uri)["uri"]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
@@ -93,8 +99,33 @@ def test_append_index_rewrites_only_extensionless_paths(uri, expected):
     assert _rewrite(uri) == expected
 
 
-def test_route53_alias_record_created():
-    _template().resource_count_is("AWS::Route53::RecordSet", 2)  # A + AAAA
+# One canonical host: www must 301 to the apex, path intact, before any rewrite.
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize("uri", ["/", "/DM-L", "/DM-L/12486", "/robots.txt"])
+def test_www_redirects_to_the_apex(uri):
+    res = _call(uri, host="www.swimtrends.dk")
+    assert res["statusCode"] == 301
+    assert res["headers"]["location"]["value"] == f"https://swimtrends.dk{uri}"
+    # A redirect is a response, not a rewritten request.
+    assert "uri" not in res
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_apex_is_never_redirected():
+    assert _call("/DM-L/12486", host="swimtrends.dk") == {
+        "uri": "/DM-L/12486/index.html",
+        "headers": {"host": {"value": "swimtrends.dk"}},
+    }
+
+
+def test_route53_alias_records_created():
+    t = _template()
+    t.resource_count_is("AWS::Route53::RecordSet", 4)  # A + AAAA, apex + www
+    for name in ("swimtrends.dk.", "www.swimtrends.dk."):
+        for rtype in ("A", "AAAA"):
+            t.has_resource_properties("AWS::Route53::RecordSet", {
+                "Name": name, "Type": rtype,
+            })
 
 
 def test_cost_budget_alarm_created():
