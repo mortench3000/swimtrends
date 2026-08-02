@@ -114,3 +114,19 @@ def test_limit_caps_the_path_table(con, logs):
 def test_default_path_points_at_the_cf_prefix():
     assert traffic.default_path("swimtrends-web-logs") == (
         "s3://swimtrends-web-logs/cf/*.gz")
+
+
+def test_report_is_empty_when_no_files_match(con, tmp_path):
+    # The state of the log prefix for the first hour after the stack is
+    # deployed: CloudFront has not delivered anything yet.
+    empty = traffic.report(
+        con, str(tmp_path / "nothing" / "*.gz"), since=date(2026, 7, 1))
+    assert empty == {"by_day": [], "by_path": [], "by_referrer": []}
+
+
+def test_report_still_raises_on_a_real_io_error(con):
+    # Not a missing glob — a bucket we cannot reach must not be reported as
+    # "no traffic".
+    with pytest.raises(duckdb.Error):
+        traffic.report(con, "s3://swimtrends-web-logs/cf/*.gz",
+                       since=date(2026, 7, 1))
