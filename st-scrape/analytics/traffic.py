@@ -9,6 +9,7 @@ field order.
 Every function takes a live DuckDB connection and a glob, so tests point it at
 local files and the CLI points it at S3.
 """
+import duckdb
 
 LOG_COLUMNS = [
     "date", "time", "x_edge_location", "sc_bytes", "c_ip", "cs_method",
@@ -87,7 +88,16 @@ def _grouped(con, path, since, group, order, limit):
     if limit is not None:
         sql += " LIMIT ?"
         params.append(limit)
-    return con.execute(sql, params).fetchall()
+    try:
+        return con.execute(sql, params).fetchall()
+    except duckdb.IOException as exc:
+        # An empty prefix is the normal state for the first hour after the
+        # stack is deployed, and for any window before logging was enabled —
+        # "no rows", not an error. Every other IO failure (unreachable bucket,
+        # missing credentials) must still surface.
+        if "No files found" not in str(exc):
+            raise
+        return []
 
 
 def report(con, path, *, since, limit=15):
