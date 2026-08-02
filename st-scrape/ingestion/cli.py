@@ -13,6 +13,7 @@ Read-only curated-zone queries (need only AWS creds, not the ingestion env):
   swimtrends meets [--category DM-K] [--season 2026]  # meets by season + counts
   swimtrends categories                    # per-category coverage
   swimtrends summary                       # top-level totals
+  swimtrends traffic [--days 14]           # site page hits, human vs bot
 
 register talks to DynamoDB directly; dispatch invokes the dispatcher Lambda.
 """
@@ -73,6 +74,19 @@ def build_parser():
     sub.add_parser("categories", help="Per-category coverage: meets, season span, result totals.")
     sub.add_parser("summary", help="Top-level totals for the whole curated zone.")
 
+    tra = sub.add_parser(
+        "traffic",
+        help="Page hits, paths and referrers from the CloudFront access logs.")
+    tra.add_argument("--days", type=int, default=14,
+                     help="How far back to look. Default 14; logs expire at 90.")
+    tra.add_argument("--bucket", default="swimtrends-web-logs",
+                     help="Access-log bucket. Default swimtrends-web-logs.")
+    tra.add_argument("--path", default=None,
+                     help="Read this glob instead of the bucket's cf/ prefix "
+                          "(a local path works, which is how the tests run).")
+    tra.add_argument("--limit", type=int, default=15,
+                     help="Rows in the path and referrer tables. Default 15.")
+
     sub.add_parser("pending", help="List registered meets awaiting (re)scrape (status scheduled|failed).")
 
     return parser
@@ -80,7 +94,7 @@ def build_parser():
 
 # Read-only analytics commands: need only S3 credentials (via connect), not the
 # ingestion/curate env wiring. main() short-circuits these before requiring it.
-READONLY_COMMANDS = frozenset({"query", "meets", "categories", "summary"})
+READONLY_COMMANDS = frozenset({"query", "meets", "categories", "summary", "traffic"})
 
 
 def _default_query_connect():
@@ -176,6 +190,37 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
                   "cross_era_best, club_leaderboard, age_group_ranking, pacing, "
                   "event_standard_by_season, final_cutline_by_season, …")
         code.interact(banner=banner, local={"con": con, "sql": lambda q: print(con.sql(q))})
+        return 0
+
+    if args.command == "traffic":
+        from datetime import date, timedelta
+
+        from analytics import overview, traffic as traffic_mod
+
+        con = (connect or _default_query_connect)()
+        path = args.path or traffic_mod.default_path(args.bucket)
+        since = date.today() - timedelta(days=args.days)
+        rep = traffic_mod.report(con, path, since=since, limit=args.limit)
+
+        if not rep["by_day"]:
+            # Logs are delivered several times an hour and may lag up to 24h,
+            # so an empty recent window is normal rather than an error.
+            print(f"No traffic since {since}. "
+                  "Note CloudFront can take up to 24h to deliver logs.")
+            return 0
+
+        print(f"Page requests since {since} (human / bot)\n")
+        print(overview.render_table(
+            ["date", "human", "bot"],
+            [[r["date"], r["human"], r["bot"]] for r in rep["by_day"]]))
+        print("\ntop paths")
+        print(overview.render_table(
+            ["path", "human", "bot"],
+            [[r["path"], r["human"], r["bot"]] for r in rep["by_path"]]))
+        print("\ntop referrers")
+        print(overview.render_table(
+            ["referrer", "human", "bot"],
+            [[r["referrer"], r["human"], r["bot"]] for r in rep["by_referrer"]]))
         return 0
 
     if args.command in ("meets", "categories", "summary"):
