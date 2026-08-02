@@ -405,31 +405,13 @@ model.
 
 ## Site traffic
 
-CloudFront writes an access log for every request to swimtrends.dk into
-`s3://swimtrends-web-logs/cf/` (gzipped TSV, expired after 90 days). To read it:
+Web traffic to swimtrends.dk is a **different dataset** from the curated swim
+data above — CloudFront access logs in `s3://swimtrends-web-logs/cf/`, read
+with:
 
 ```bash
 cd st-scrape
 AWS_PROFILE=swimtrends .venv/bin/python -m ingestion.cli traffic
 ```
 
-Three tables — hits per day, top paths, top referrers — each split human vs
-bot. Flags: `--days N` (default 14), `--limit N` (default 15, path/referrer
-tables only), `--bucket`, and `--path` to read some other glob.
-
-Notes for whoever reads the numbers:
-
-- **Bot is a guess.** It is a user-agent substring match
-  (`bot|crawl|spider|slurp`). Honest crawlers say so; a scraper posing as
-  Chrome counts as human.
-- **The bot column is the point right after an indexing change** — it is how
-  you confirm Googlebot is actually fetching the prerendered meet shells.
-  Search Console cannot tell you that, because uncrawled pages never appear
-  there.
-- **Logs lag.** CloudFront delivers several times an hour but may take up to
-  24 hours. Judge by yesterday, not the last five minutes.
-- **Your own visits count.** There is no cookie and no way to exclude yourself.
-- **Edge cache hits are logged** (`x-edge-result-type=Hit`), so the counts are
-  complete even though most requests never reach S3.
-- **Search queries are not here.** Google strips them from the referrer; they
-  live only in Google Search Console.
+Full walkthrough, recipes and troubleshooting: [`traffic.md`](traffic.md).
