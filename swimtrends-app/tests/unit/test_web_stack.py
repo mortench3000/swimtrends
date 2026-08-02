@@ -226,3 +226,30 @@ def test_deploy_role_cannot_delete_the_data_zone():
     assert len(denies) == 1, denies
     assert denies[0]["Action"] == "s3:DeleteObject*"
     assert "/data/*" in json.dumps(denies[0]["Resource"])
+
+
+def test_logs_bucket_has_acls_enabled_and_90_day_expiry():
+    # Legacy CloudFront logging delivers via an ACL grant; buckets created
+    # after April 2023 default to BUCKET_OWNER_ENFORCED, which disables ACLs
+    # and makes delivery fail silently. BucketOwnerPreferred is load-bearing.
+    _template().has_resource_properties("AWS::S3::Bucket", {
+        "BucketName": "swimtrends-web-logs",
+        "OwnershipControls": {
+            "Rules": [{"ObjectOwnership": "BucketOwnerPreferred"}]
+        },
+        "LifecycleConfiguration": {
+            "Rules": [assertions.Match.object_like({
+                "ExpirationInDays": 90, "Status": "Enabled",
+            })]
+        },
+    })
+
+
+def test_distribution_logs_to_the_logs_bucket():
+    _template().has_resource_properties("AWS::CloudFront::Distribution", {
+        "DistributionConfig": assertions.Match.object_like({
+            "Logging": assertions.Match.object_like({
+                "Prefix": "cf/", "IncludeCookies": False,
+            })
+        })
+    })
