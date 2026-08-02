@@ -36,6 +36,29 @@ class SwimtrendsWebStack(Stack):
             auto_delete_objects=True,
         )
 
+        # CloudFront access logs (standard logging, legacy). Legacy rather than
+        # v2 because a v2 delivery source must be created in us-east-1 even when
+        # the bucket is in eu-west-1 — a second cross-region stack, which is not
+        # worth Parquet output for a site with near-zero traffic.
+        # BUCKET_OWNER_PREFERRED is load-bearing: legacy delivery uses an ACL
+        # grant, and the post-April-2023 default (BUCKET_OWNER_ENFORCED)
+        # disables ACLs, so CloudFront would silently deliver nothing.
+        # Explicitly named so `swimtrends traffic` can default to it instead of
+        # resolving a generated name from stack outputs.
+        logs_bucket = s3.Bucket(
+            self, "LogsBucket",
+            bucket_name="swimtrends-web-logs",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            object_ownership=s3.ObjectOwnership.BUCKET_OWNER_PREFERRED,
+            # Access logs carry c-ip, which is personal data under GDPR. The
+            # expiry is the mitigation; nothing downstream needs older logs.
+            lifecycle_rules=[s3.LifecycleRule(expiration=Duration.days(90))],
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
+        )
+
         # Kept for the routes that are *not* prerendered (races, unknown paths):
         # the SPA reads location.pathname and renders them client-side.
         spa_fallback = [
@@ -69,6 +92,10 @@ class SwimtrendsWebStack(Stack):
                     event_type=cloudfront.FunctionEventType.VIEWER_REQUEST)],
             ),
             error_responses=spa_fallback,
+            enable_logging=True,
+            log_bucket=logs_bucket,
+            log_file_prefix="cf/",
+            log_includes_cookies=False,
             price_class=cloudfront.PriceClass.PRICE_CLASS_100,
         )
 
@@ -164,6 +191,7 @@ class SwimtrendsWebStack(Stack):
             )
 
         CfnOutput(self, "SiteBucketName", value=bucket.bucket_name)
+        CfnOutput(self, "LogsBucketName", value=logs_bucket.bucket_name)
         CfnOutput(self, "DistributionId", value=distribution.distribution_id)
         CfnOutput(self, "SiteUrl", value=f"https://{DOMAIN}")
         CfnOutput(self, "GitHubDeployRoleArn", value=deploy_role.role_arn)
