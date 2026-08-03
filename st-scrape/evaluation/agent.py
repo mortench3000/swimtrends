@@ -212,7 +212,10 @@ _GENDER_WORD = {"M": "herrernes", "F": "damernes", "X": ""}
 # ponytail: drop the word, don't re-case — the model writes this after a numeral,
 # never sentence-initially. Rule 10's wording is the cause and is worth fixing on
 # the next PROMPT_VERSION bump.
-_COUNTED = re.compile(r"\btællende (svømmere)", re.IGNORECASE)
+# tællende / tællede / tælle- : the same idiom in three spellings across two
+# rounds. Requiring "svømmere" immediately after keeps the legitimate verb safe —
+# "Stævnet tæller 265 juniorer" always has a count next, never the noun.
+_COUNTED = re.compile(r"\btæll[a-zæøå]*\s*(svømmere)", re.IGNORECASE)
 # Em- and en-dashes become a plain hyphen. The en-dash is not only typography:
 # the model writes club names with it ("GTI – Greve") where the digest — and so
 # the page, and check_attribution's masking — has "GTI - Greve".
@@ -228,8 +231,11 @@ _DASHES = str.maketrans({"—": "-", "–": "-"})
 # club table's podiums slot ("6 titler, 12 pokaler og 16 svømmere"), so they all
 # mean podiepladser. ponytail: always plural, because the model only ever writes
 # this after a count — a mangled singular would need agreement, and none exists.
+# palle-/pallads- need the plads/placer continuation: bare "Palle" is a Danish
+# first name, and this runs case-insensitively.
 _PODIUM = re.compile(r"\bpodieplacer(?!ing(?:er|en|erne)?\b)[a-zæøå]*"
-                     r"|\bpokal[a-zæøå]*", re.IGNORECASE)
+                     r"|\bpokal[a-zæøå]*"
+                     r"|\b(?:palle|pallads)(?:plads|placer)[a-zæøå]*", re.IGNORECASE)
 # English terms with exactly one Danish word each, so swapping is a repair and
 # not a guess. Same reason as the podium family: DM-K/10976 answered four
 # rejections with "46 events" every time, and a gate that only rejects cannot
@@ -242,6 +248,8 @@ _DANISH_FOR = {
     "strokearter": "stilarter", "stroketyper": "stilarter",
     "slagarter": "stilarter", "podiums": "podiepladser",
     "deltas": "forskelle", "deltaer": "forskelle",
+    # A Danish compound the model drops an s from. Same operation, same map.
+    "femårsnit": "femårssnit", "femårsnittet": "femårssnittet",
 }
 _ENGLISH = re.compile(
     r"\b(" + "|".join(sorted(_DANISH_FOR, key=len, reverse=True)) + r")\b",
