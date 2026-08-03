@@ -684,3 +684,22 @@ def test_clubs_rule_does_not_overclaim_on_the_junior_path():
     the digest counted, not claim it is everyone entered."""
     assert "the number of swimmers each club entered" not in ag.SYSTEM_PROMPT
     assert "the number of the club's swimmers the digest counted" in ag.SYSTEM_PROMPT
+
+
+# --- plain_events ------------------------------------------------------------
+
+@pytest.mark.parametrize("raw, want", [
+    # The two forms actually published: raw marker, and Danish word + course.
+    ("vandt M 100m Fly (SCM) med 51.76",
+     "vandt herrernes 100m Fly med 51.76"),
+    ("F 400m Fri (LCM) med 667 point",
+     "Damernes 400m Fri med 667 point"),
+    ("standarden i herrernes 400m Fri (LCM) med tiden",
+     "standarden i herrernes 400m Fri med tiden"),
+    # Mixed relay: marker dropped, no Danish word invented.
+    ("i X 4x50m HM (SCM) blev", "i 4x50m HM blev"),
+    # A sentence that merely contains a distance is left alone.
+    ("Han svømmede 50m Ryg på 24.66", "Han svømmede 50m Ryg på 24.66"),
+])
+def test_plain_events(raw, want):
+    assert ag.plain_events(raw) == want

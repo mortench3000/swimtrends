@@ -15,6 +15,7 @@ PROMPT_VERSION / SCHEMA_VERSION are part of the cache key: bump either and
 every meet regenerates on the next run. Do that deliberately.
 """
 import logging
+import re
 from typing import Literal
 
 from pydantic import BaseModel, field_validator
@@ -175,6 +176,34 @@ class MeetEvaluation(BaseModel):
 
 def model_label(model_id: str) -> str:
     return MODEL_LABELS.get(model_id, model_id)
+
+
+# --- publish-time event labels -----------------------------------------------
+# The digest indexes events as "M 100m Fri (LCM)" — gender marker plus course —
+# and rule 9 makes the model carry the gender through, which it often does by
+# copying the marker verbatim. That reads as machine output in Danish prose.
+# Rewriting it here rather than tightening the prompt leaves the cached text (and
+# the number/gender/attribution checks that ran on it) untouched, so every
+# already-generated report is cleaned up without a regeneration.
+_MARKER = re.compile(r"\b([MFX]) (?=[\dx]+m\s+(?:Fri|Ryg|Bryst|Fly|IM|HM)\b)")
+_COURSE = re.compile(r" \((?:LCM|SCM)\)")
+# X is the mixed relay: only one event of its kind, so dropping the marker
+# loses nothing that needs a Danish word.
+_GENDER_WORD = {"M": "herrernes", "F": "damernes", "X": ""}
+
+
+def plain_events(text: str) -> str:
+    """Digest event labels as prose: "M 100m Fri (LCM)" -> "herrernes 100m Fri"."""
+    def sub(m):
+        word = _GENDER_WORD[m.group(1)]
+        if not word:
+            return ""
+        head = text[:m.start()].rstrip()
+        # Sentence-initial: "M 100m Fri blev vundet af" -> "Herrernes …".
+        if not head or head[-1] in ".:!?":
+            word = word.capitalize()
+        return f"{word} "
+    return _COURSE.sub("", _MARKER.sub(sub, text))
 
 
 def _numbered_guardrail(guardrail_id: str, guardrail_version: str) -> tuple[str, str]:
