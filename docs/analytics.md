@@ -211,7 +211,7 @@ is something like a model inferring geographic spread from a bare club count —
 claim the deterministic number check cannot see either, since it isn't a number.
 
 The threshold and the shape of the check are measured, not guessed, and the two
-are inseparable — **the report is checked one section at a time**, four
+are inseparable — **the report is checked one section at a time**, five
 `ApplyGuardrail` calls per generated meet:
 
 | what was scored | grounding score |
@@ -381,7 +381,7 @@ Three measures, each addressing a different link in that chain:
 
 | measure | where | what it stops |
 | --- | --- | --- |
-| the section heading is a schema `Literal` | `Section.heading` | the trigger: the model can read the four legal strings *before* it answers, instead of being told only that its guess was wrong |
+| the section heading is a schema `Literal` | `Section.heading` | the trigger: the model can read the five legal strings *before* it answers, instead of being told only that its guess was wrong |
 | `LIMITS = {"turns": 6, "total_tokens": 40_000}` on every invocation | `evaluate()` | the runaway itself — a hard per-meet ceiling ~10× a healthy meet's spend and ~35× below what the incident cost |
 | `input_tokens` / `output_tokens` in the run summary | `run()` | the blindness: `generated=25, skipped=16` read as a healthy run, and the only evidence was the bill two days later |
 

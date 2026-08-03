@@ -147,6 +147,131 @@ _JUNIOR_TOP_SWIMS_SQL = f"""
     ORDER BY points DESC, name, distance, stroke, gender LIMIT {TOP_N}
 """
 
+# --- per-entity aggregates within one meet ------------------------------------
+# The phase/rank rule -- a heat win is not a medal, a timed final counts as a
+# final, and dead heats share a rank so one event can yield two titles -- is
+# medal_count's definition (analytics/views/50_field_evolution.sql). medal_count
+# carries no class filter; these queries additionally exclude para swims
+# (WHERE class = 'open'), so titles and podiums here count open results only.
+# Counted per result row for exactly that reason.
+_FINAL_PHASES = "phase IN ('final', 'timed_final')"
+
+CLUB_N = 5
+
+# The club medal table for this meet. `swimmers` counts everyone the club
+# entered (all phases) -- it is context for the club's size, not part of the
+# performance measure; titles and podiums are finals-only.
+#
+# The ORDER BY is a TOTAL order, ending on `club`, which is unique per row. A
+# LIMIT over a partial order lets DuckDB return a different top 5 per call, and
+# the digest is part of the evaluation cache key (see _TOP_SWIMS_SQL above).
+# `swimmers` sits in the chain so a meet whose curated data holds no finals at
+# all still ranks by something meaningful instead of alphabetically.
+# params: category, meet_id
+_CLUBS_SQL = f"""
+    WITH agg AS (
+        SELECT club,
+               count(DISTINCT swimmer_id) AS swimmers,
+               count(*) FILTER (WHERE {_FINAL_PHASES} AND rank = 1
+                                  AND points IS NOT NULL) AS titles,
+               count(*) FILTER (WHERE {_FINAL_PHASES}
+                                  AND rank BETWEEN 1 AND 3
+                                  AND points IS NOT NULL) AS podiums
+        FROM results_by_category
+        WHERE category = ? AND meet_id = ? AND class = 'open'
+          AND club IS NOT NULL
+        GROUP BY club
+    )
+    SELECT club, swimmers, titles, podiums,
+           row_number() OVER (ORDER BY titles DESC, podiums DESC,
+                                       swimmers DESC, club) AS rank
+    FROM agg
+    ORDER BY rank LIMIT {CLUB_N}
+"""
+
+# params: meet_id
+_JUNIOR_CLUBS_SQL = f"""
+    WITH agg AS (
+        SELECT club,
+               count(DISTINCT swimmer_id) AS swimmers,
+               count(*) FILTER (WHERE junior_rank = 1
+                                  AND points IS NOT NULL) AS titles,
+               count(*) FILTER (WHERE junior_rank BETWEEN 1 AND 3
+                                  AND points IS NOT NULL) AS podiums
+        FROM junior_championship
+        WHERE meet_id = ? AND club IS NOT NULL
+        GROUP BY club
+    )
+    SELECT club, swimmers, titles, podiums,
+           row_number() OVER (ORDER BY titles DESC, podiums DESC,
+                                       swimmers DESC, club) AS rank
+    FROM agg
+    ORDER BY rank LIMIT {CLUB_N}
+"""
+
+MIN_TITLES = 3
+
+# Canonical stroke order, the same one the SPA's race filter uses. Not
+# alphabetical and not order of appearance: both vary, and the digest has to be
+# byte-stable.
+_STROKE_ORDER = ("Fri", "Ryg", "Bryst", "Fly", "IM", "HM")
+
+# Swimmers with MIN_TITLES or more individual titles at this meet, one row per
+# winning swim. NO LIMIT: a cutoff is the defect this block fixes. Ranking by
+# points hides exactly the rarest achievement -- points run higher in sprint
+# free and fly than in breast and IM, so a single-event specialist takes a
+# top_swims slot at 822 while four titles across three strokes at 715-764 takes
+# none (DM-L/10334, Mathias Christensen).
+#
+# `wins` dedups to one row per swimmer per event before counting: a para
+# override (`swimtrends class set`) can leave a final AND its duplicate timed
+# final both class='open' for the same swim, and counting rows would then
+# inflate that swimmer's title count and can wrongly admit a two-title
+# swimmer to the block. `phase` breaks the tie deterministically when the
+# duplicate rows also tie on points -- the only way two rows share a
+# (swimmer_id, event) here. points IS NOT NULL matches _TOP_SWIMS_SQL: a rank-1
+# final with no base time is not a scored title, and every points value
+# elsewhere in the digest is non-null.
+#
+# The outer ORDER BY is total (swimmer_id last), and it also groups each
+# swimmer's rows together so _multi_title_swimmers can fold them in one pass.
+# params: category, meet_id
+_MULTI_TITLE_SQL = f"""
+    WITH wins AS (
+        SELECT swimmer_id, name, club, event, stroke, points
+        FROM results_by_category
+        WHERE category = ? AND meet_id = ? AND class = 'open'
+          AND {_FINAL_PHASES} AND rank = 1 AND swimmer_id IS NOT NULL
+          AND points IS NOT NULL
+        QUALIFY row_number() OVER (
+            PARTITION BY swimmer_id, event ORDER BY points DESC, phase) = 1
+    )
+    SELECT swimmer_id, name, club, event, stroke, points,
+           count(*) OVER (PARTITION BY swimmer_id) AS titles
+    FROM wins
+    QUALIFY titles >= {MIN_TITLES}
+    ORDER BY titles DESC, name, swimmer_id, points DESC, event
+"""
+
+# params: meet_id
+# junior_championship holds at most one row per swimmer per event (it filters
+# phase IN ('heats', 'timed_final')), so the dedup below never removes a real
+# row here -- it only keeps this query the same shape as its senior pair.
+_JUNIOR_MULTI_TITLE_SQL = f"""
+    WITH wins AS (
+        SELECT swimmer_id, name, club, event, stroke, points
+        FROM junior_championship
+        WHERE meet_id = ? AND junior_rank = 1 AND points IS NOT NULL
+        QUALIFY row_number() OVER (
+            PARTITION BY swimmer_id, event ORDER BY points DESC) = 1
+    )
+    SELECT swimmer_id, name, club, event, stroke, points,
+           count(*) OVER (PARTITION BY swimmer_id) AS titles
+    FROM wins
+    QUALIFY titles >= {MIN_TITLES}
+    ORDER BY titles DESC, name, swimmer_id, points DESC, event
+"""
+
 # median points this season vs the mean of the prior seasons in the window.
 # `oldest` is history[-1]["season"] — the on-record window already computed
 # for season_history — NOT season - 5, since a category may have gaps.
@@ -228,6 +353,33 @@ def _with_stroke_deltas(rows: list[dict]) -> list[dict]:
     return rows
 
 
+def _multi_title_swimmers(rows) -> list[dict]:
+    """Per-win rows -> one dict per swimmer, order preserved.
+
+    Grouped on swimmer_id, which is NOT emitted (the digest names no ids): two
+    swimmers sharing a name must not merge into one four-title swimmer. An
+    unknown stroke sorts last rather than raising -- a curate surprise should
+    not take down the whole batch.
+    """
+    out: list[dict] = []
+    by_id: dict[str, dict] = {}
+    for swimmer_id, name, club, event, stroke, points, titles in rows:
+        row = by_id.get(swimmer_id)
+        if row is None:
+            row = {"name": name, "club": club, "titles": titles,
+                   "strokes": [], "wins": []}
+            by_id[swimmer_id] = row
+            out.append(row)
+        if stroke not in row["strokes"]:
+            row["strokes"].append(stroke)
+        row["wins"].append({"event": event, "points": points})
+    for row in out:
+        row["strokes"].sort(
+            key=lambda s: (_STROKE_ORDER.index(s) if s in _STROKE_ORDER
+                           else len(_STROKE_ORDER), s))
+    return out
+
+
 def build(con, category: str, meet_id: str) -> dict:
     junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
     head = con.execute(_HEAD_SQL, [category, meet_id]).fetchone()
@@ -265,14 +417,19 @@ def build(con, category: str, meet_id: str) -> dict:
 
     swim_cols = ["name", "club", "event", "time", "points", "rank"]
     stroke_cols = ["stroke", "dist_group", "median_points", "prev5_median"]
+    club_cols = ["club", "swimmers", "titles", "podiums", "rank"]
     if junior:
         top = con.execute(_JUNIOR_TOP_SWIMS_SQL, [meet_id]).fetchall()
         strokes = con.execute(_JUNIOR_BY_STROKE_SQL,
                               [oldest, season, season, season]).fetchall()
+        clubs = con.execute(_JUNIOR_CLUBS_SQL, [meet_id]).fetchall()
+        multi = con.execute(_JUNIOR_MULTI_TITLE_SQL, [meet_id]).fetchall()
     else:
         top = con.execute(_TOP_SWIMS_SQL, [category, meet_id]).fetchall()
         strokes = con.execute(_BY_STROKE_SQL,
                               [category, oldest, season, season, season]).fetchall()
+        clubs = con.execute(_CLUBS_SQL, [category, meet_id]).fetchall()
+        multi = con.execute(_MULTI_TITLE_SQL, [category, meet_id]).fetchall()
 
     return {
         "meet": {"name": head[0], "date": head[1], "season": season,
@@ -280,6 +437,8 @@ def build(con, category: str, meet_id: str) -> dict:
         "facts": facts,
         "season_history": history,
         "top_swims": [dict(zip(swim_cols, r)) for r in top],
+        "clubs": [dict(zip(club_cols, r)) for r in clubs],
+        "multi_title_swimmers": _multi_title_swimmers(multi),
         "by_stroke": _with_stroke_deltas([dict(zip(stroke_cols, r)) for r in strokes]),
         "derived": _derived(facts, history),
     }

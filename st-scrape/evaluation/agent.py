@@ -26,8 +26,8 @@ from evaluation.check import check_attribution, check_genders, check_numbers
 
 log = logging.getLogger("evaluation")
 
-PROMPT_VERSION = "6"
-SCHEMA_VERSION = "2"
+PROMPT_VERSION = "7"
+SCHEMA_VERSION = "3"
 
 REGION = "eu-west-1"
 MAX_TOKENS = 1200
@@ -58,6 +58,7 @@ HEADINGS = (
     "Bredde",
     "Fremhævede svømninger",
     "Discipliner i bevægelse",
+    "Klubberne",
 )
 
 # Human-readable label shown in the page footer next to the generation date.
@@ -72,7 +73,7 @@ You are an experienced Danish swimming coach writing a short evaluation of a
 national championship meet for a public analytics site. You write in DANISH.
 
 You will be given a <digest> containing every fact you may use. Write about
-250 words total, split into exactly these four sections, in this order, with
+300 words total, split into exactly these five sections, in this order, with
 these headings verbatim:
 
 {chr(10).join('  - ' + h for h in HEADINGS)}
@@ -89,11 +90,14 @@ Rules — these are absolute:
 2. COMPARISONS. Compare against the seasons in digest.season_history only.
    If there is little or no history, say so plainly rather than implying a
    trend.
-3. NAMED SWIMMERS. You may name swimmers from digest.top_swims and state their
-   time, points, placement and event. Nothing else. Never write about a
-   swimmer's potential or future, their technique, body, health, injuries, age,
-   training or schooling, and never phrase anything as criticism of a named
-   person. Many of these swimmers are minors.
+3. NAMED SWIMMERS. You may name swimmers from digest.top_swims and from
+   digest.multi_title_swimmers, and state their time, points, placement and
+   event. Nothing else. A swimmer's title count is
+   digest.multi_title_swimmers[].titles — quote it, never count the wins
+   yourself. Never write about a swimmer's potential or future, their
+   technique, body, health, injuries, age, training or schooling, and never
+   phrase anything as criticism of a named person. Many of these swimmers are
+   minors.
 4. TONE. Informed, sober, specific. No hype, no exclamation marks, no emoji.
    Write as an analyst who respects the reader's knowledge of the sport.
 5. Danish stroke names are used in the data and in your text: Fri, Ryg, Bryst,
@@ -120,13 +124,24 @@ Rules — these are absolute:
 8. PLAIN DANISH. Write natural Danish prose only — never a field name,
    camelCase identifier, or English technical token. Say "elitens median",
    not "elitens medianScore".
-9. EVENT NAMES. digest.top_swims[].event carries a gender marker (e.g.
+9. EVENT NAMES. Every event in digest.top_swims and in
+   digest.multi_title_swimmers[].wins carries a gender marker (e.g.
    "M 50m Ryg (LCM)", "F 50m Ryg (LCM)") because men's and women's events
    share the same name otherwise. Always carry that gender into your text —
    "herrernes 50m Ryg" / "damernes 50m Ryg", or M/F as the digest does.
    "50m Ryg" alone is ambiguous between two different swimmers.
+10. CLUBS. digest.clubs is this meet's club table, already ordered: rank 1 is
+    the club with the most titles. The section "Klubberne" reports that order
+    and the figures in it — titles, podiums and
+    the number of the club's swimmers the digest counted. Say a club led
+    the meet only if it is rank 1. Never rank a club that is not in
+    digest.clubs, never characterise the clubs that are absent from it
+    (the meet had more clubs than the table shows), and never judge a
+    club or explain its position. Clubs are organisations, so rule 3
+    does not apply to them — rule 6 still does: a club name is not a
+    place, and a title count is not a statement about a region.
 
-Output the four sections through the provided structure. Do not add sections,
+Output the five sections through the provided structure. Do not add sections,
 headings, preambles or closing remarks.
 """
 
@@ -136,7 +151,7 @@ class EvaluationError(Exception):
 
 
 class Section(BaseModel):
-    # A Literal, not a str with a validator: this puts the four legal strings in
+    # A Literal, not a str with a validator: this puts the five legal strings in
     # the tool schema the model reads *before* it answers, and pydantic's own
     # rejection message lists them. With only a validator, one misspelled heading
     # ("Fremhævede svømminger") sent Haiku into 105 tool calls on a single meet —
@@ -152,7 +167,7 @@ class MeetEvaluation(BaseModel):
 
     @field_validator("sections")
     @classmethod
-    def all_four_in_order(cls, v: list[Section]) -> list[Section]:
+    def all_sections_in_order(cls, v: list[Section]) -> list[Section]:
         if tuple(s.heading for s in v) != HEADINGS:
             raise ValueError(f"sections must be exactly {HEADINGS} in order")
         return v
@@ -306,7 +321,8 @@ def _prompt(digest_json: str, offenders: set[str] | None = None,
         bad = ", ".join(sorted(wrong_gender))
         return (f"{head}\n"
                 f"Your previous answer described these events with the wrong "
-                f"gender: {bad}. Every event in digest.top_swims carries its "
+                f"gender: {bad}. Every event in digest.top_swims and in "
+                f"digest.multi_title_swimmers[].wins carries its "
                 f"gender as the first character (\"F 50m Ryg (LCM)\" is a "
                 f"women's race, \"M 50m Ryg (LCM)\" a men's). Rewrite the "
                 f"evaluation and take each event's gender from that marker.")
@@ -316,10 +332,12 @@ def _prompt(digest_json: str, offenders: set[str] | None = None,
         bad = ", ".join(sorted(misattributed))
         return (f"{head}\n"
                 f"Your previous answer credited the wrong swimmer with these "
-                f"results ({bad}). Each entry in digest.top_swims binds one "
-                f"name to one event, time and points — never move a figure "
-                f"from one swimmer to another, and never total up a swimmer's "
-                f"wins. Rewrite the evaluation.")
+                f"results ({bad}). Each entry in digest.top_swims and in "
+                f"digest.multi_title_swimmers[].wins binds one name to one "
+                f"event, time and points — never move a figure from one "
+                f"swimmer to another. A swimmer's title count is "
+                f"digest.multi_title_swimmers[].titles; take it from there "
+                f"rather than counting wins yourself. Rewrite the evaluation.")
     if blocked:
         # The model cannot see the guardrail's verdict, so name the section and
         # the offence. Grounding is what fails here in practice: a section that
