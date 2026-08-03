@@ -419,25 +419,30 @@ _NOT_DANISH = frozenset({
     # Digest field names and English technical tokens — rule 8 already forbids
     # these, and they still arrive verbatim ("digest.derived angiver 0 procent",
     # "negative deltas", "over 46 events").
-    "digest", "derived", "deltas", "deltaer", "events", "stroke", "strokes",
-    "strokearter", "stroketyper", "slagarter", "podiums", "performance",
-    "longdistancer", "longbanenivået", "mediumdistance", "mediemdistance",
-    "langtidsstroker",
+    # Only the ones a swap cannot repair: these arrive inside a phrase
+    # ("digest.derived angiver 0 procent") or are compound calques with no single
+    # Danish equivalent. events/strokes/podiums/deltas moved to
+    # agent.plain_prose's _DANISH_FOR, because rejecting them only ever burned
+    # retries (DM-K/10976 answered four rejections with "46 events").
+    "digest", "derived", "performance", "longdistancer", "longbanenivået",
+    "mediumdistance", "mediemdistance", "langtidsstroker",
     # Invented words and transpositions. Each one was published.
     "bredtevældet", "brystsvømmingen", "conquisterede", "flageslagsdiscipliner",
     "frisvømming", "frisvømmingen", "førtede", "guldmedajer", "herernes",
     "herremændenes", "højteste", "langtbane", "mediaanresultat",
-    "deltagtallet", "mødetets", "pokaljepladser", "sichrede", "sprintintersvig",
+    "deltagtallet", "mødetets", "sichrede", "sprintintersvig",
     "stemmmer", "topede", "topsværgmelser", "umplaceringer", "velrepsentierede",
     "vindersømmninger",
 })
 _WORD = re.compile(r"[A-Za-zÆØÅæøå]+")
-# One word this model mangles reliably and *differently* every time —
-# podieplacerigner, podieplacerringer, podieplaceriger, podieplaceriner in four
-# reports. Enumerating misspellings loses that race; every correct form
-# continues "podieplacer" with "ing", so the negative lookahead catches the
-# whole family, including the ones not written yet.
-_MANGLED = re.compile(r"\bpodieplacer(?!ing)[a-zæøå]*", re.IGNORECASE)
+# NOT here: the podium vocabulary the model cannot spell (podieplacerigner,
+# podieplaceringe, podieplacerninger, pokaler, pokalpladser, pokaliepladser,
+# pokalieplaceringer — a new spelling every round). Every one of them sat in the
+# club table's podiums slot, so they are mechanically repairable, and
+# agent.plain_prose rewrites them at publish time. Gating them instead burned all
+# four attempts on a word the retry prompt cannot teach: DM-K/6042 came back with
+# a *fresh* misspelling twice in a row. This gate is for what a rewrite cannot
+# fix; a known word spelled wrong is not that.
 
 
 def check_language(text: str, digest: dict) -> set[str]:
@@ -449,6 +454,4 @@ def check_language(text: str, digest: dict) -> set[str]:
     """
     names = " ".join(_named_swimmers(digest) | _club_names(digest)).lower()
     proper = set(_WORD.findall(names))
-    found = {w.lower() for w in _WORD.findall(text or "")} & _NOT_DANISH
-    found |= {m.group(0).lower() for m in _MANGLED.finditer(text or "")}
-    return found - proper
+    return ({w.lower() for w in _WORD.findall(text or "")} & _NOT_DANISH) - proper
