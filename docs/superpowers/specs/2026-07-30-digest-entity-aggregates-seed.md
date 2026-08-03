@@ -1,7 +1,12 @@
 # Spec seed: per-entity aggregates in the AI meet evaluation digest
 
-Status: **not specified yet** — this is the pre-work for a planning session,
-written 2026-07-30 so the sizing work isn't repeated. Not a plan, not approved.
+Status: **superseded 2026-08-03** by
+[`2026-08-03-digest-entity-aggregates-design.md`](2026-08-03-digest-entity-aggregates-design.md),
+which is the approved design. This file stays for the measurements and the
+sizing behind its decisions — the open questions below are answered there.
+
+Originally: pre-work for a planning session, written 2026-07-30 so the sizing
+work isn't repeated.
 
 Two requests that turn out to be the same shape of work — an aggregate **per
 entity within one meet**, precomputed into the digest so the model reports it
