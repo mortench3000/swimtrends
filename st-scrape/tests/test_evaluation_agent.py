@@ -686,7 +686,7 @@ def test_clubs_rule_does_not_overclaim_on_the_junior_path():
     assert "the number of the club's swimmers the digest counted" in ag.SYSTEM_PROMPT
 
 
-# --- plain_events ------------------------------------------------------------
+# --- plain_prose ------------------------------------------------------------
 
 @pytest.mark.parametrize("raw, want", [
     # The two forms actually published: raw marker, and Danish word + course.
@@ -701,8 +701,8 @@ def test_clubs_rule_does_not_overclaim_on_the_junior_path():
     # A sentence that merely contains a distance is left alone.
     ("Han svømmede 50m Ryg på 24.66", "Han svømmede 50m Ryg på 24.66"),
 ])
-def test_plain_events(raw, want):
-    assert ag.plain_events(raw) == want
+def test_plain_prose(raw, want):
+    assert ag.plain_prose(raw) == want
 
 
 def test_non_danish_prose_is_rewritten_before_publishing():
@@ -727,3 +727,33 @@ def test_the_language_retry_prompt_names_the_rule_it_broke():
     prompt = ag._prompt("{}", foreign={"digest", "derived"})
     assert "derived, digest" in prompt          # sorted, like every other branch
     assert "dansk" in prompt.lower() or "Danish" in prompt
+
+
+@pytest.mark.parametrize("raw, want", [
+    # DM-L/10334: digest.clubs[].swimmers is just how many of the club's
+    # swimmers competed, but prompt rule 10 calls it "the swimmers the digest
+    # counted", and the model rendered that as the Danish idiom for counting
+    # toward a standing ("tællende kampe"). No gate can see it — 31 is in the
+    # digest, every word is Danish, and the sentence is grounded.
+    ("6 titler, 18 podiepladser og 31 tællende svømmere.",
+     "6 titler, 18 podiepladser og 31 svømmere."),
+    # The plain forms the same section already uses are left alone.
+    ("4 titler og 8 podiepladser fra 7 svømmere.",
+     "4 titler og 8 podiepladser fra 7 svømmere."),
+])
+def test_plain_prose_drops_the_counting_swimmers_idiom(raw, want):
+    assert ag.plain_prose(raw) == want
+
+
+@pytest.mark.parametrize("raw, want", [
+    ("Niveauet var uændret — 612 point i median.",
+     "Niveauet var uændret - 612 point i median."),
+    # The en-dash is the same defect and worse: it corrupts a club name the
+    # digest spells with a plain hyphen ("GTI - Greve"), which is the string
+    # check_attribution masks on.
+    ("Karoline Barrett, GTI – Greve, vandt.", "Karoline Barrett, GTI - Greve, vandt."),
+    # A hyphen already in the text is untouched, ranges included.
+    ("præsterede på 720-750 point", "præsterede på 720-750 point"),
+])
+def test_plain_prose_normalizes_typographic_dashes(raw, want):
+    assert ag.plain_prose(raw) == want

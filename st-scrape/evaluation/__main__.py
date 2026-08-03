@@ -172,9 +172,9 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 cache.put(s3, category, meet_id, key, payload)
                 stats["generated"] += 1
 
-            # Cache the model's own words, publish them as prose (plain_events).
+            # Cache the model's own words, publish them as prose (plain_prose).
             published = {**payload, "sections": [
-                {**s, "body": ag.plain_events(s["body"])} for s in payload["sections"]]}
+                {**s, "body": ag.plain_prose(s["body"])} for s in payload["sections"]]}
             write_json(out / category / meet_id / "evaluation.json", published)
             stats["written"] += 1
         except Exception:
