@@ -217,6 +217,35 @@ _COUNTED = re.compile(r"\btællende (svømmere)", re.IGNORECASE)
 # the model writes club names with it ("GTI – Greve") where the digest — and so
 # the page, and check_attribution's masking — has "GTI - Greve".
 _DASHES = str.maketrans({"—": "-", "–": "-"})
+# The podium vocabulary, which this model cannot spell and cannot be taught to:
+# podieplacerigner, podieplacerringer, podieplaceriger, podieplaceriner,
+# podieplaceringe, podieplacerninger, plus a whole "pokal" (trophy) branch —
+# pokaler, pokalpladser, pokaliepladser, pokalieplaceringer, pokaljepladser. A
+# new spelling every round, so gating it burned all four attempts (DM-K/6042
+# answered a rejection with a *fresh* misspelling, twice).
+#
+# Repairing it is safe rather than a guess: every single occurrence sat in the
+# club table's podiums slot ("6 titler, 12 pokaler og 16 svømmere"), so they all
+# mean podiepladser. ponytail: always plural, because the model only ever writes
+# this after a count — a mangled singular would need agreement, and none exists.
+_PODIUM = re.compile(r"\bpodieplacer(?!ing(?:er|en|erne)?\b)[a-zæøå]*"
+                     r"|\bpokal[a-zæøå]*", re.IGNORECASE)
+# English terms with exactly one Danish word each, so swapping is a repair and
+# not a guess. Same reason as the podium family: DM-K/10976 answered four
+# rejections with "46 events" every time, and a gate that only rejects cannot
+# teach vocabulary. "digest"/"derived" are deliberately NOT here — they arrive
+# inside a phrase ("digest.derived angiver 0 procent") where dropping the token
+# leaves broken prose, so those stay gated and get rewritten by the model.
+_DANISH_FOR = {
+    "events": "discipliner", "event": "disciplin",
+    "strokes": "stilarter", "stroke": "stilart",
+    "strokearter": "stilarter", "stroketyper": "stilarter",
+    "slagarter": "stilarter", "podiums": "podiepladser",
+    "deltas": "forskelle", "deltaer": "forskelle",
+}
+_ENGLISH = re.compile(
+    r"\b(" + "|".join(sorted(_DANISH_FOR, key=len, reverse=True)) + r")\b",
+    re.IGNORECASE)
 
 
 def plain_prose(text: str) -> str:
@@ -235,7 +264,12 @@ def plain_prose(text: str) -> str:
             word = word.capitalize()
         return f"{word} "
     out = _COUNTED.sub(r"\1", _COURSE.sub("", _MARKER.sub(sub, text)))
-    return out.translate(_DASHES)
+    out = _PODIUM.sub("podiepladser", out)
+
+    def danish(m):
+        word = _DANISH_FOR[m.group(1).lower()]
+        return word.capitalize() if m.group(1)[0].isupper() else word
+    return _ENGLISH.sub(danish, out).translate(_DASHES)
 
 
 def _numbered_guardrail(guardrail_id: str, guardrail_version: str) -> tuple[str, str]:

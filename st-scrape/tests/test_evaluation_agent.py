@@ -757,3 +757,37 @@ def test_plain_prose_drops_the_counting_swimmers_idiom(raw, want):
 ])
 def test_plain_prose_normalizes_typographic_dashes(raw, want):
     assert ag.plain_prose(raw) == want
+
+
+def test_plain_prose_repairs_the_podium_vocabulary():
+    """The model cannot spell this family and answers a rejection with a fresh
+    misspelling, so it is repaired rather than gated. Safe because every observed
+    occurrence sat in the club table's podiums slot ("6 titler, 12 pokaler")."""
+    for bad in ("pokaler", "pokalpladser", "pokaliepladser", "pokalieplaceringer",
+                "pokaljepladser", "podieplaceringe", "podieplacerninger",
+                "podieplacerigner", "podieplaceriner"):
+        assert ag.plain_prose(f"6 titler, 12 {bad} og 16 svømmere.") == (
+            "6 titler, 12 podiepladser og 16 svømmere."), bad
+    for good in ("podiepladser", "podieplaceringer", "podieplaceringerne"):
+        assert ag.plain_prose(f"12 {good}.") == f"12 {good}."
+    # A correct singular is left alone, and so is unrelated prose.
+    assert ag.plain_prose("hans eneste podieplacering") == "hans eneste podieplacering"
+
+
+def test_plain_prose_swaps_the_english_terms_with_a_fixed_danish_word():
+    """Same reasoning as the podium family: DM-K/10976 answered four rejections
+    with "46 events" every time. These have one unambiguous Danish word each, so
+    they are repaired. "digest"/"derived" are NOT here — they arrive inside a
+    phrase ("digest.derived angiver 0 procent") where dropping a token leaves
+    broken prose, so those stay gated."""
+    cases = {
+        "Stævnet blev afviklet over 46 events.": "Stævnet blev afviklet over 46 discipliner.",
+        "Alle strokes lå under niveauet.": "Alle stilarter lå under niveauet.",
+        "8 titler og 13 podiums.": "8 titler og 13 podiepladser.",
+        "viser negative deltas i forhold til": "viser negative forskelle i forhold til",
+        "På tværs af slagarter og distancer": "På tværs af stilarter og distancer",
+    }
+    for raw, want in cases.items():
+        assert ag.plain_prose(raw) == want
+    # Sentence-initial keeps its capital.
+    assert ag.plain_prose("Events fordelte sig jævnt.") == "Discipliner fordelte sig jævnt."

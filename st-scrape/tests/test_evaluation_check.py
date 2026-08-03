@@ -381,9 +381,9 @@ def test_a_digest_field_name_in_the_prose_is_caught():
 
 
 def test_an_observed_typo_is_caught():
-    """DM-L/7833 wrote "podieplacerigner" three times in one section."""
-    assert check.check_language("7 titler og 7 podieplacerigner fordelt på 3 "
-                                "svømmere.", DIGEST) == {"podieplacerigner"}
+    """DM-K/9780 published "stemmmer overens" with three m's."""
+    assert check.check_language("Tallet stemmmer overens med 2022.",
+                                DIGEST) == {"stemmmer"}
 
 
 def test_correct_danish_prose_passes():
@@ -409,16 +409,14 @@ def test_the_danish_definite_form_of_historik_is_not_norwegian():
     assert check.check_language("Det højeste i historikk.", DIGEST) == {"historikk"}
 
 
-def test_every_mangling_of_podieplaceringer_is_caught():
-    """The word list found this one four different ways ("podieplacerigner",
-    "podieplacerringer", "podieplaceriger", "podieplaceriner") and would have
-    kept finding new ones. Every correct form continues "podieplacer" with
-    "ing", so a prefix rule closes the whole family."""
-    for bad in ("podieplacerigner", "podieplacerringer", "podieplaceriger",
-                "podieplaceriner", "podieplacerer"):
-        assert check.check_language(f"7 titler og 7 {bad}.", DIGEST) == {bad}
-    for good in ("podieplacering", "podieplaceringer", "podieplaceringerne"):
-        assert check.check_language(f"7 titler og 7 {good}.", DIGEST) == set()
+def test_a_repairable_misspelling_is_not_this_gates_business():
+    """The division of labour: agent.plain_prose repairs the podium vocabulary
+    at publish time, so gating it here would only burn retries on a word the
+    model answers with a *fresh* misspelling every round (DM-K/6042, twice)."""
+    for repairable in ("pokaler", "pokalpladser", "pokalieplaceringer",
+                       "podieplaceringe", "podieplacerninger", "events",
+                       "strokes", "podiums", "deltas"):
+        assert check.check_language(f"Klubben tog 7 {repairable}.", DIGEST) == set()
 
 
 # --- the meet's own date -----------------------------------------------------
