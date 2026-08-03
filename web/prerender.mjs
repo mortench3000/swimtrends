@@ -54,11 +54,24 @@ ${urls}
 `
 }
 
-async function getJson(rel, { optional = false } = {}) {
+// A missing data object does not 404: the CloudFront distribution answers with
+// its custom error response, i.e. HTTP 200 and the SPA shell. So "absent" has to
+// be detected from the body, not the status — dataClient.js does the same with
+// its .catch(() => null). Only optional fetches may swallow it; a required file
+// arriving as HTML still has to fail the build, because web-deploy syncs
+// --delete and prerendering nothing would take the good pages with it.
+export async function getJson(rel, { optional = false } = {}) {
   const res = await fetch(`${DATA_BASE}/${rel}`)
   if (res.status === 404 && optional) return null
   if (!res.ok) throw new Error(`prerender: GET ${DATA_BASE}/${rel} -> HTTP ${res.status}`)
-  return res.json()
+  const body = await res.text()
+  try {
+    return JSON.parse(body)
+  } catch {
+    if (optional) return null
+    throw new Error(`prerender: GET ${DATA_BASE}/${rel} -> not JSON `
+      + `(${body.slice(0, 40).replace(/\s+/g, ' ')}…)`)
+  }
 }
 
 const link = (path, label) => `<a href="${esc(path)}">${esc(label)}</a>`

@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { catLabel, clip, homeMeta, categoryMeta, meetMeta, raceMeta } from '../src/lib/seo.js'
-import { renderShell, buildSitemap } from '../prerender.mjs'
+import { renderShell, buildSitemap, getJson } from '../prerender.mjs'
 
 const meet = {
   category: 'DM-L', meet_id: '12486', meet_name: 'DM Langbane 2026',
@@ -88,4 +88,35 @@ test('buildSitemap emits absolute URLs and escapes nothing unexpected', () => {
   expect(xml).toContain('<loc>https://swimtrends.dk/DM-L/12486</loc>')
   expect(xml.trim().startsWith('<?xml')).toBe(true)
   expect(xml).toContain('</urlset>')
+})
+
+// --- getJson -----------------------------------------------------------------
+// A missing data object does NOT 404 here: CloudFront's custom error response
+// serves the SPA shell with HTTP 200, which is why dataClient.js catches instead
+// of checking the status. prerender.mjs only handled 404, so deleting one
+// unpublishable meet's evaluation.json broke every master deploy with
+// "SyntaxError: Unexpected token '<'".
+
+function stubFetch(body, { status = 200 } = {}) {
+  globalThis.fetch = async () => ({
+    ok: status < 400, status, text: async () => body,
+  })
+}
+
+test('an optional object served as the SPA fallback shell reads as absent', async () => {
+  stubFetch('<!doctype html>\n<html lang="da"><head><title>Swimtrends</title>')
+  expect(await getJson('DM-K/10976/evaluation.json', { optional: true })).toBe(null)
+})
+
+test('a required object served as the SPA fallback shell fails the build', async () => {
+  stubFetch('<!doctype html>\n<html lang="da">')
+  await expect(getJson('index.json')).rejects.toThrow(/not JSON/)
+})
+
+test('an optional 404 still reads as absent, and real JSON still parses', async () => {
+  stubFetch('nope', { status: 404 })
+  expect(await getJson('DM-K/10976/evaluation.json', { optional: true })).toBe(null)
+  stubFetch('{"sections":[]}')
+  expect(await getJson('DM-L/12486/evaluation.json', { optional: true }))
+    .toEqual({ sections: [] })
 })
