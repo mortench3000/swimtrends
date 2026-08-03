@@ -163,3 +163,111 @@ def tied_points_con() -> duckdb.DuckDBPyConnection:
     build_curated(con, obt=obt, meets=meets)
     create_views(con)
     return con
+
+
+def multi_title_con() -> duckdb.DuckDBPyConnection:
+    """One DM-L meet built to exercise both per-entity aggregates.
+
+    Deliberate contents, each pinning one rule:
+      * Mathias Christensen wins 4 finals across 3 strokes (the DM-L/10334
+        shape) and is SECOND in a fifth -- a second place is not a title.
+      * Anders Andersen and Anna Testsen win 3 each, so the block's tie on
+        `titles` is broken by name; Anna's Ryg titles are entered before her
+        Fri one, so canonical stroke order is observable.
+      * Dobbelt Vinder wins 2: below the threshold, absent from the block.
+      * A dead heat (two rank-1 rows in one event, same club) gives that club
+        two titles from one event.
+      * Heat Winner wins a HEAT with more points than anyone: not a title.
+      * A class='para' swim with 999 points: invisible to both blocks.
+      * Three filler clubs with no podiums and 3/2/1 swimmers: the top-5 cut
+        and the `swimmers DESC` fallback ordering.
+    """
+    mid, season, mdate = "M2026", 2026, "2026-04-10"
+    mname = "Multi Champs 2026"
+    meets = [dict(meet_id=mid, meet_name=mname, venue="Aarhus", course="LCM",
+                  season=season, meet_date=mdate, category=["DM-L"])]
+    obt, rid = [], 0
+
+    def add(sid, name, club, gender, distance, stroke, points, rank,
+            phase="Final", klass="open"):
+        nonlocal rid
+        rid += 1
+        cs = 6000 + rid
+        obt.append(_row(
+            result_id=f"{mid}-{rid}", race_id=rid, meet_id=mid, rank=rank,
+            name=name, swimmer_id=sid, club=club, completed_time=_time(cs),
+            completed_centiseconds=cs, points=points, points_fixed=points,
+            season=season, meet_name=mname, meet_date=mdate, distance=distance,
+            stroke=stroke, gender=gender, type=phase, **{"class": klass}))
+
+    for g, d, st, p in [("M", 200, "IM", 764), ("M", 100, "Fly", 729),
+                        ("M", 200, "Bryst", 725), ("M", 400, "IM", 715)]:
+        add("m1", "Mathias Christensen", "Sigma Swim Allerød", g, d, st, p, 1)
+    add("m1", "Mathias Christensen", "Sigma Swim Allerød", "M", 100, "Bryst", 690, 2)
+
+    for d, p in [(50, 800), (100, 790), (200, 780)]:
+        add("m2", "Anders Andersen", "AGF", "M", d, "Fri", p, 1)
+
+    for d, st, p in [(100, "Ryg", 770), (200, "Ryg", 760), (100, "Fri", 750)]:
+        add("m3", "Anna Testsen", "AGF", "F", d, st, p, 1)
+
+    for d, p in [(50, 700), (100, 695)]:
+        add("m4", "Dobbelt Vinder", "VEST", "F", d, "Bryst", p, 1)
+
+    add("m5", "Dead Heat A", "AGF", "F", 200, "Fly", 710, 1)
+    add("m6", "Dead Heat B", "AGF", "F", 200, "Fly", 710, 1)
+    add("h1", "Heat Winner", "VEST", "M", 50, "Ryg", 900, 1, phase="Heats")
+    add("p1", "Para Swimmer", "PARAKLUB", "M", 100, "Fly", 999, 1,
+        phase="Timed final", klass="para")
+
+    for club, n in [("KLUB A", 3), ("KLUB B", 2), ("KLUB C", 1)]:
+        for i in range(n):
+            add(f"{club[-1].lower()}{i}", f"{club} Swimmer {i}", club,
+                "M", 200, "IM", 400 - i, 4 + i)
+
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+    return con
+
+
+def junior_multi_title_con() -> duckdb.DuckDBPyConnection:
+    """A DM-L + DMJ-L meet where a SENIOR sweeps the finals and a JUNIOR sweeps
+    the junior field.
+
+    The junior title comes from the qualifying swim, so Senior Sweeper's three
+    finals (and his own heats) must be invisible on the junior path: the junior
+    digest must report Junior Jens, not him. Three events, so a junior clears
+    MIN_TITLES.
+    """
+    mid, season, mdate = "JM2026", 2026, "2026-04-10"
+    mname = "Junior Multi Champs 2026"
+    events = [("M", 100, "Fri"), ("M", 200, "Fri"), ("M", 100, "Ryg")]
+    meets = [dict(meet_id=mid, meet_name=mname, venue="Aarhus", course="LCM",
+                  season=season, meet_date=mdate, category=["DM-L", "DMJ-L"])]
+    obt, rid = [], 0
+
+    def add(sid, name, club, by, gender, distance, stroke, points, rank, cs, phase):
+        nonlocal rid
+        rid += 1
+        obt.append(_row(
+            result_id=f"{mid}-{rid}", race_id=rid, meet_id=mid, rank=rank,
+            name=name, swimmer_id=sid, club=club, birth_year=by,
+            completed_time=_time(cs), completed_centiseconds=cs, points=points,
+            points_fixed=points, season=season, meet_name=mname, meet_date=mdate,
+            distance=distance, stroke=stroke, gender=gender, type=phase))
+
+    for i, (g, d, st) in enumerate(events):
+        add("sen1", "Senior Sweeper", "SENIORKLUB", 2000, g, d, st,
+            900 - i, 1, 5000 + i, "Final")
+        add("sen1", "Senior Sweeper", "SENIORKLUB", 2000, g, d, st,
+            880 - i, 1, 5100 + i, "Heats")
+        add("jun1", "Junior Jens", "AGF", season - 17, g, d, st,
+            700 - i, 2, 5300 + i, "Heats")
+        add("jun2", "Junior Jonas", "VEST", season - 17, g, d, st,
+            650 - i, 3, 5400 + i, "Heats")
+
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+    return con

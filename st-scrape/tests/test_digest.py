@@ -1,5 +1,6 @@
 from tests.evaluation_fixtures import (digest_con, gapped_digest_con,
-                                       junior_digest_con, tied_points_con)
+                                       junior_digest_con, junior_multi_title_con,
+                                       multi_title_con, tied_points_con)
 from tests.webbuild_fixtures import relay_con
 from webbuild import digest, queries
 
@@ -170,3 +171,46 @@ def test_top_swims_are_deterministic_when_points_tie_at_the_cutoff():
     # And the tie is broken on a documented key, not on scan order.
     tied = [s["name"] for s in first if s["points"] == 500]
     assert tied == sorted(tied)
+
+
+def test_clubs_is_a_medal_table_ordered_by_titles_then_podiums():
+    d = digest.build(multi_title_con(), "DM-L", "M2026")
+    assert [(c["club"], c["titles"], c["podiums"], c["swimmers"], c["rank"])
+            for c in d["clubs"]] == [
+        ("AGF", 8, 8, 4, 1),                    # 3 + 3 titles + a dead-heated 2
+        ("Sigma Swim Allerød", 4, 5, 1, 2),     # 4 titles, and a second place
+        ("VEST", 2, 2, 2, 3),
+        ("KLUB A", 0, 0, 3, 4),                 # no podiums: ordered by swimmers
+        ("KLUB B", 0, 0, 2, 5),
+    ]
+    # CLUB_N truncates: KLUB C (1 swimmer, no podiums) falls off the table.
+    assert len(d["clubs"]) == digest.CLUB_N
+    assert "KLUB C" not in {c["club"] for c in d["clubs"]}
+
+
+def test_clubs_ignores_heat_wins_and_para_swims():
+    """A heat win is not a title (medal_count's rule), and a para swim is not
+    scored at all. Heat Winner has the meet's highest points and swims for
+    VEST, so a missing phase filter shows up as VEST holding three titles."""
+    d = digest.build(multi_title_con(), "DM-L", "M2026")
+    vest = next(c for c in d["clubs"] if c["club"] == "VEST")
+    assert vest["titles"] == 2
+    assert "PARAKLUB" not in {c["club"] for c in d["clubs"]}
+
+
+def test_clubs_breaks_a_full_tie_on_club_name():
+    """Every club in this fixture has the same swimmer count and podium count,
+    so only the name makes the order total -- and a LIMIT over a non-total
+    order silently changes the digest, which is part of the cache key."""
+    d = digest.build(digest_con(), "DM-L", "D2026")
+    assert [(c["club"], c["titles"], c["podiums"], c["swimmers"])
+            for c in d["clubs"]] == [
+        ("AGF", 4, 4, 8), ("SIGMA", 0, 4, 8), ("VEST", 0, 4, 8)]
+
+
+def test_clubs_on_the_junior_path_uses_junior_ranks():
+    """Seniors fill the senior final; the junior title is decided in the heats.
+    SENIORKLUB must be absent entirely, not merely ranked below."""
+    d = digest.build(junior_multi_title_con(), "DMJ-L", "JM2026")
+    assert [(c["club"], c["titles"], c["podiums"], c["swimmers"])
+            for c in d["clubs"]] == [("AGF", 3, 3, 1), ("VEST", 0, 3, 1)]
