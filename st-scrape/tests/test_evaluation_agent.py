@@ -506,7 +506,7 @@ def test_build_agent_refuses_a_blank_guardrail_id(bad):
 # generation would have mixed text from two different prompts under one cache
 # key -- the cache-determinism guarantee failing silently, which is the only way
 # it can fail. Update these hashes in the same commit as the version bump.
-SYSTEM_PROMPT_SHA256 = "afcad88f139e029ad36ef6a7573ffb4148a3b28a15a72826a76477fdc4932510"
+SYSTEM_PROMPT_SHA256 = "eb4c27ca9068afdfdea37d134b94af5a8c3a2feeb956e4d246754a0718ab0f0b"
 SCHEMA_SHA256 = "84c8fb754611963b7b76bbaae680f39b28ef6616468eea266c3c3c2212b8cf9e"
 
 
@@ -663,3 +663,24 @@ def test_the_retry_prompt_points_at_the_precomputed_title_count():
     prompt = ag._prompt("{}", misattributed={"Emilie Beckmann: 764"})
     assert "digest.multi_title_swimmers" in prompt
     assert "never total up a swimmer's wins" not in prompt
+
+
+def test_gender_rules_name_both_blocks_that_can_carry_the_marker():
+    """check_genders judges events inside multi_title_swimmers[].wins too, but
+    the rule and the retry prompt used to name only top_swims -- so a gendered
+    event that exists only inside a win pointed the model's rewrite at a
+    top_swims list where that event never appears, burning every retry."""
+    assert ("digest.multi_title_swimmers[].wins carries a gender marker"
+            in ag.SYSTEM_PROMPT)
+    prompt = ag._prompt("{}", wrong_gender={"damernes 200m IM"})
+    assert "digest.top_swims" in prompt
+    assert "digest.multi_title_swimmers[].wins" in prompt
+
+
+def test_clubs_rule_does_not_overclaim_on_the_junior_path():
+    """On the junior path digest.clubs comes from junior_championship, which
+    holds only juniors with a qualifying swim -- so "every swimmer each club
+    entered" understates a club's actual entry. The rule must describe what
+    the digest counted, not claim it is everyone entered."""
+    assert "the number of swimmers each club entered" not in ag.SYSTEM_PROMPT
+    assert "the number of the club's swimmers the digest counted" in ag.SYSTEM_PROMPT

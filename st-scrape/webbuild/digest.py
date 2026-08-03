@@ -148,10 +148,12 @@ _JUNIOR_TOP_SWIMS_SQL = f"""
 """
 
 # --- per-entity aggregates within one meet ------------------------------------
-# Titles and podiums use medal_count's definition (analytics/views/
-# 50_field_evolution.sql): a heat win is not a medal, a timed final counts as a
-# final, and dead heats share a rank so one event can yield two titles. Counted
-# per result row for exactly that reason.
+# The phase/rank rule -- a heat win is not a medal, a timed final counts as a
+# final, and dead heats share a rank so one event can yield two titles -- is
+# medal_count's definition (analytics/views/50_field_evolution.sql). medal_count
+# carries no class filter; these queries additionally exclude para swims
+# (WHERE class = 'open'), so titles and podiums here count open results only.
+# Counted per result row for exactly that reason.
 _FINAL_PHASES = "phase IN ('final', 'timed_final')"
 
 CLUB_N = 5
@@ -170,9 +172,11 @@ _CLUBS_SQL = f"""
     WITH agg AS (
         SELECT club,
                count(DISTINCT swimmer_id) AS swimmers,
-               count(*) FILTER (WHERE {_FINAL_PHASES} AND rank = 1) AS titles,
+               count(*) FILTER (WHERE {_FINAL_PHASES} AND rank = 1
+                                  AND points IS NOT NULL) AS titles,
                count(*) FILTER (WHERE {_FINAL_PHASES}
-                                  AND rank BETWEEN 1 AND 3) AS podiums
+                                  AND rank BETWEEN 1 AND 3
+                                  AND points IS NOT NULL) AS podiums
         FROM results_by_category
         WHERE category = ? AND meet_id = ? AND class = 'open'
           AND club IS NOT NULL
@@ -190,8 +194,10 @@ _JUNIOR_CLUBS_SQL = f"""
     WITH agg AS (
         SELECT club,
                count(DISTINCT swimmer_id) AS swimmers,
-               count(*) FILTER (WHERE junior_rank = 1) AS titles,
-               count(*) FILTER (WHERE junior_rank BETWEEN 1 AND 3) AS podiums
+               count(*) FILTER (WHERE junior_rank = 1
+                                  AND points IS NOT NULL) AS titles,
+               count(*) FILTER (WHERE junior_rank BETWEEN 1 AND 3
+                                  AND points IS NOT NULL) AS podiums
         FROM junior_championship
         WHERE meet_id = ? AND club IS NOT NULL
         GROUP BY club
@@ -217,27 +223,51 @@ _STROKE_ORDER = ("Fri", "Ryg", "Bryst", "Fly", "IM", "HM")
 # top_swims slot at 822 while four titles across three strokes at 715-764 takes
 # none (DM-L/10334, Mathias Christensen).
 #
-# The ORDER BY is total (swimmer_id last), and it also groups each swimmer's
-# rows together so _multi_title_swimmers can fold them in one pass.
+# `wins` dedups to one row per swimmer per event before counting: a para
+# override (`swimtrends class set`) can leave a final AND its duplicate timed
+# final both class='open' for the same swim, and counting rows would then
+# inflate that swimmer's title count and can wrongly admit a two-title
+# swimmer to the block. `phase` breaks the tie deterministically when the
+# duplicate rows also tie on points -- the only way two rows share a
+# (swimmer_id, event) here. points IS NOT NULL matches _TOP_SWIMS_SQL: a rank-1
+# final with no base time is not a scored title, and every points value
+# elsewhere in the digest is non-null.
+#
+# The outer ORDER BY is total (swimmer_id last), and it also groups each
+# swimmer's rows together so _multi_title_swimmers can fold them in one pass.
 # params: category, meet_id
 _MULTI_TITLE_SQL = f"""
+    WITH wins AS (
+        SELECT swimmer_id, name, club, event, stroke, points
+        FROM results_by_category
+        WHERE category = ? AND meet_id = ? AND class = 'open'
+          AND {_FINAL_PHASES} AND rank = 1 AND swimmer_id IS NOT NULL
+          AND points IS NOT NULL
+        QUALIFY row_number() OVER (
+            PARTITION BY swimmer_id, event ORDER BY points DESC, phase) = 1
+    )
     SELECT swimmer_id, name, club, event, stroke, points,
            count(*) OVER (PARTITION BY swimmer_id) AS titles
-    FROM results_by_category
-    WHERE category = ? AND meet_id = ? AND class = 'open'
-      AND {_FINAL_PHASES} AND rank = 1 AND swimmer_id IS NOT NULL
+    FROM wins
     QUALIFY titles >= {MIN_TITLES}
     ORDER BY titles DESC, name, swimmer_id, points DESC, event
 """
 
 # params: meet_id
 # junior_championship holds at most one row per swimmer per event (it filters
-# phase IN ('heats', 'timed_final')), so counting rows counts titles.
+# phase IN ('heats', 'timed_final')), so the dedup below never removes a real
+# row here -- it only keeps this query the same shape as its senior pair.
 _JUNIOR_MULTI_TITLE_SQL = f"""
+    WITH wins AS (
+        SELECT swimmer_id, name, club, event, stroke, points
+        FROM junior_championship
+        WHERE meet_id = ? AND junior_rank = 1 AND points IS NOT NULL
+        QUALIFY row_number() OVER (
+            PARTITION BY swimmer_id, event ORDER BY points DESC) = 1
+    )
     SELECT swimmer_id, name, club, event, stroke, points,
            count(*) OVER (PARTITION BY swimmer_id) AS titles
-    FROM junior_championship
-    WHERE meet_id = ? AND junior_rank = 1
+    FROM wins
     QUALIFY titles >= {MIN_TITLES}
     ORDER BY titles DESC, name, swimmer_id, points DESC, event
 """

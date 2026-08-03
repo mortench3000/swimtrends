@@ -1,6 +1,7 @@
-from tests.evaluation_fixtures import (digest_con, gapped_digest_con,
-                                       junior_digest_con, junior_multi_title_con,
-                                       multi_title_con, tied_points_con)
+from tests.evaluation_fixtures import (digest_con, duplicate_win_con,
+                                       gapped_digest_con, junior_digest_con,
+                                       junior_multi_title_con, multi_title_con,
+                                       tied_points_con, unscored_win_con)
 from tests.webbuild_fixtures import relay_con
 from webbuild import digest, queries
 
@@ -256,6 +257,34 @@ def test_multi_title_strokes_are_distinct_and_canonically_ordered():
     anders = next(s for s in d["multi_title_swimmers"]
                   if s["name"] == "Anders Andersen")
     assert anders["strokes"] == ["Fri"]          # three Fri titles, one entry
+
+
+def test_multi_title_swimmers_dedups_a_swimmer_x_event_duplicate():
+    """A para override (`swimtrends class set`) can leave a final and its
+    duplicate timed final both class='open' for the same swim. Counting rows
+    without a swimmer x event dedup would inflate Double Winner's 2 real
+    titles to 3 counted rows and wrongly admit him to the block."""
+    d = digest.build(duplicate_win_con(), "DM-L", "DUP2026")
+    assert d["multi_title_swimmers"] == []
+
+
+def test_multi_title_swimmers_excludes_a_win_with_no_points():
+    """A rank-1 final with no base time for that event/season is not a scored
+    title, and every other points value in the digest is non-null."""
+    d = digest.build(unscored_win_con(), "DM-L", "UNS2026")
+    swimmer = d["multi_title_swimmers"][0]
+    assert swimmer["titles"] == 3
+    assert len(swimmer["wins"]) == 3
+    assert all(w["points"] is not None for w in swimmer["wins"])
+
+
+def test_clubs_excludes_a_points_less_win_from_titles():
+    """Same rule as multi_title_swimmers: a points-less win is not a scored
+    title, though the swimmer still counts toward the club's size."""
+    d = digest.build(unscored_win_con(), "DM-L", "UNS2026")
+    club = next(c for c in d["clubs"] if c["club"] == "AGF")
+    assert club["titles"] == 3
+    assert club["swimmers"] == 1
 
 
 def test_multi_title_swimmers_is_empty_when_nobody_sweeps():

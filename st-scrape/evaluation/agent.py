@@ -124,20 +124,22 @@ Rules — these are absolute:
 8. PLAIN DANISH. Write natural Danish prose only — never a field name,
    camelCase identifier, or English technical token. Say "elitens median",
    not "elitens medianScore".
-9. EVENT NAMES. digest.top_swims[].event carries a gender marker (e.g.
+9. EVENT NAMES. Every event in digest.top_swims and in
+   digest.multi_title_swimmers[].wins carries a gender marker (e.g.
    "M 50m Ryg (LCM)", "F 50m Ryg (LCM)") because men's and women's events
    share the same name otherwise. Always carry that gender into your text —
    "herrernes 50m Ryg" / "damernes 50m Ryg", or M/F as the digest does.
    "50m Ryg" alone is ambiguous between two different swimmers.
 10. CLUBS. digest.clubs is this meet's club table, already ordered: rank 1 is
     the club with the most titles. The section "Klubberne" reports that order
-    and the figures in it — titles, podiums and the number of swimmers each
-    club entered. Say a club led the meet only if it is rank 1. Never rank a
-    club that is not in digest.clubs, never characterise the clubs that are
-    absent from it (the meet had more clubs than the table shows), and never
-    judge a club or explain its position. Clubs are organisations, so rule 3
-    does not apply to them — rule 6 still does: a club name is not a place,
-    and a title count is not a statement about a region.
+    and the figures in it — titles, podiums and
+    the number of the club's swimmers the digest counted. Say a club led
+    the meet only if it is rank 1. Never rank a club that is not in
+    digest.clubs, never characterise the clubs that are absent from it
+    (the meet had more clubs than the table shows), and never judge a
+    club or explain its position. Clubs are organisations, so rule 3
+    does not apply to them — rule 6 still does: a club name is not a
+    place, and a title count is not a statement about a region.
 
 Output the five sections through the provided structure. Do not add sections,
 headings, preambles or closing remarks.
@@ -319,7 +321,8 @@ def _prompt(digest_json: str, offenders: set[str] | None = None,
         bad = ", ".join(sorted(wrong_gender))
         return (f"{head}\n"
                 f"Your previous answer described these events with the wrong "
-                f"gender: {bad}. Every event in digest.top_swims carries its "
+                f"gender: {bad}. Every event in digest.top_swims and in "
+                f"digest.multi_title_swimmers[].wins carries its "
                 f"gender as the first character (\"F 50m Ryg (LCM)\" is a "
                 f"women's race, \"M 50m Ryg (LCM)\" a men's). Rewrite the "
                 f"evaluation and take each event's gender from that marker.")

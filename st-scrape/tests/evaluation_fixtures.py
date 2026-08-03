@@ -231,6 +231,80 @@ def multi_title_con() -> duckdb.DuckDBPyConnection:
     return con
 
 
+def duplicate_win_con() -> duckdb.DuckDBPyConnection:
+    """A swimmer whose win in one event is duplicated as a Timed final
+    alongside its Final row, both class='open' -- reachable when a para
+    override (`swimtrends class set`) leaves both rows open. Without a
+    swimmer x event dedup, counting rows inflates the swimmer's title count
+    (here from 2 real titles to 3 counted rows) and wrongly admits a
+    below-threshold swimmer to the block.
+    """
+    mid, season, mdate = "DUP2026", 2026, "2026-04-10"
+    mname = "Duplicate Champs 2026"
+    meets = [dict(meet_id=mid, meet_name=mname, venue="Aarhus", course="LCM",
+                  season=season, meet_date=mdate, category=["DM-L"])]
+    obt, rid = [], 0
+
+    def add(sid, name, club, gender, distance, stroke, points, rank,
+            phase="Final", klass="open"):
+        nonlocal rid
+        rid += 1
+        cs = 6000 + rid
+        obt.append(_row(
+            result_id=f"{mid}-{rid}", race_id=rid, meet_id=mid, rank=rank,
+            name=name, swimmer_id=sid, club=club, completed_time=_time(cs),
+            completed_centiseconds=cs, points=points, points_fixed=points,
+            season=season, meet_name=mname, meet_date=mdate, distance=distance,
+            stroke=stroke, gender=gender, type=phase, **{"class": klass}))
+
+    add("d1", "Double Winner", "AGF", "M", 100, "Fri", 750, 1)
+    add("d1", "Double Winner", "AGF", "M", 200, "Fri", 740, 1)
+    # The 200m Fri win duplicated as a Timed final -- same swimmer and event,
+    # both class='open'.
+    add("d1", "Double Winner", "AGF", "M", 200, "Fri", 740, 1,
+        phase="Timed final")
+
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+    return con
+
+
+def unscored_win_con() -> duckdb.DuckDBPyConnection:
+    """A rank-1 final with points=NULL (no base time for that event/season),
+    alongside enough scored wins to clear MIN_TITLES. A points-less win must
+    not be counted as a title (clubs) or appear in a multi-title swimmer's
+    wins (where every other points value in the digest is non-null).
+    """
+    mid, season, mdate = "UNS2026", 2026, "2026-04-10"
+    mname = "Unscored Champs 2026"
+    meets = [dict(meet_id=mid, meet_name=mname, venue="Aarhus", course="LCM",
+                  season=season, meet_date=mdate, category=["DM-L"])]
+    obt, rid = [], 0
+
+    def add(sid, name, club, gender, distance, stroke, points, rank,
+            phase="Final"):
+        nonlocal rid
+        rid += 1
+        cs = 6000 + rid
+        obt.append(_row(
+            result_id=f"{mid}-{rid}", race_id=rid, meet_id=mid, rank=rank,
+            name=name, swimmer_id=sid, club=club, completed_time=_time(cs),
+            completed_centiseconds=cs, points=points, points_fixed=points,
+            season=season, meet_name=mname, meet_date=mdate, distance=distance,
+            stroke=stroke, gender=gender, type=phase))
+
+    for d, st, p in [(100, "Fri", 750), (200, "Fri", 740), (200, "Ryg", 730)]:
+        add("u1", "Unscored Sweeper", "AGF", "M", d, st, p, 1)
+    # A fourth final win, but with no base time to score it against.
+    add("u1", "Unscored Sweeper", "AGF", "M", 400, "Fri", None, 1)
+
+    con = duckdb.connect()
+    build_curated(con, obt=obt, meets=meets, splits=[])
+    create_views(con)
+    return con
+
+
 def junior_multi_title_con() -> duckdb.DuckDBPyConnection:
     """A DM-L + DMJ-L meet where a SENIOR sweeps the finals and a JUNIOR sweeps
     the junior field.
