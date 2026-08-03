@@ -149,7 +149,7 @@ class EvaluationError(Exception):
 
 
 class Section(BaseModel):
-    # A Literal, not a str with a validator: this puts the four legal strings in
+    # A Literal, not a str with a validator: this puts the five legal strings in
     # the tool schema the model reads *before* it answers, and pydantic's own
     # rejection message lists them. With only a validator, one misspelled heading
     # ("Fremhævede svømminger") sent Haiku into 105 tool calls on a single meet —

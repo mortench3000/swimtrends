@@ -211,7 +211,7 @@ is something like a model inferring geographic spread from a bare club count —
 claim the deterministic number check cannot see either, since it isn't a number.
 
 The threshold and the shape of the check are measured, not guessed, and the two
-are inseparable — **the report is checked one section at a time**, four
+are inseparable — **the report is checked one section at a time**, five
 `ApplyGuardrail` calls per generated meet:
 
 | what was scored | grounding score |
