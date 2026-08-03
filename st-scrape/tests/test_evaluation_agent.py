@@ -74,7 +74,7 @@ def _guard(action="NONE"):
                           client=FakeGuardrailClient(action))
 
 
-def test_evaluate_returns_the_four_sections_in_order():
+def test_evaluate_returns_the_sections_in_order():
     fake = FakeAgent(_sections("612 point og 412 deltagere."))
     out = ag.evaluate(DIGEST, agent=fake, guard=_guard())
     assert [s["heading"] for s in out] == list(ag.HEADINGS)
@@ -114,7 +114,8 @@ def test_a_blocked_section_is_re_rolled_up_to_retries_times():
                            client=client)
     blocked = [{"heading": h, "body": b} for h, b in
                zip(ag.HEADINGS, ["612 point.", "612 point.",
-                                 "612 point i tredje.", "612 point."])]
+                                 "612 point i tredje.", "612 point.",
+                                 "612 point."])]
     fake = FakeAgent(blocked, [dict(s) for s in blocked], _sections("612 point."))
     out = ag.evaluate(DIGEST, agent=fake, guard=guard, retries=2)
     assert len(fake.prompts) == 3            # two blocks, then a clean one
@@ -224,7 +225,7 @@ def test_the_guard_checks_each_section_separately():
     can name which section was wrong.
     """
     guard = _guard()
-    bodies = [f"{n} point." for n in (612, 612, 612, 612)]
+    bodies = [f"{n} point." for n in (612, 612, 612, 612, 612)]
     fake = FakeAgent([{"heading": h, "body": b}
                       for h, b in zip(ag.HEADINGS, bodies)])
     ag.evaluate(DIGEST, agent=fake, guard=guard)
@@ -249,7 +250,7 @@ def test_a_block_logs_the_score_and_threshold_not_the_raw_assessment(caplog):
          "action": "BLOCKED", "detected": True}]}}]
     guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3", client=client)
     sections = [{"heading": h, "body": b} for h, b in
-                zip(ag.HEADINGS, ["a.", "b.", "c i tredje.", "d."])]
+                zip(ag.HEADINGS, ["a.", "b.", "c i tredje.", "d.", "e."])]
 
     with caplog.at_level("DEBUG", logger="evaluation"):
         assert guard.check(sections, "{}") == ag.HEADINGS[2]
@@ -271,7 +272,8 @@ def test_a_block_names_the_offending_section():
     client.action_for = {"tredje": "GUARDRAIL_INTERVENED"}
     guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3",
                            client=client)
-    bodies = ["612 point.", "612 point.", "612 point i tredje.", "612 point."]
+    bodies = ["612 point.", "612 point.", "612 point i tredje.", "612 point.",
+              "612 point."]
     report = [{"heading": h, "body": b} for h, b in zip(ag.HEADINGS, bodies)]
     fake = FakeAgent(report, [dict(s) for s in report])   # the retry offends too
     with pytest.raises(ag.EvaluationError, match=ag.HEADINGS[2]):
@@ -315,7 +317,8 @@ def test_a_guardrail_retry_names_the_blocked_section():
     client = FakeGuardrailClient()
     client.action_for = {"tredje": "GUARDRAIL_INTERVENED"}
     guard = ag.OutputGuard(guardrail_id="gr-1", guardrail_version="3", client=client)
-    bodies = ["612 point.", "612 point.", "612 point i tredje.", "612 point."]
+    bodies = ["612 point.", "612 point.", "612 point i tredje.", "612 point.",
+              "612 point."]
     fake = FakeAgent([{"heading": h, "body": b}
                       for h, b in zip(ag.HEADINGS, bodies)],
                      _sections("612 point."))
@@ -503,8 +506,8 @@ def test_build_agent_refuses_a_blank_guardrail_id(bad):
 # generation would have mixed text from two different prompts under one cache
 # key -- the cache-determinism guarantee failing silently, which is the only way
 # it can fail. Update these hashes in the same commit as the version bump.
-SYSTEM_PROMPT_SHA256 = "27f9a19b6b6d76d2b77d8dedd7d56b1296272adecbd69b3901de48b89d8889d7"
-SCHEMA_SHA256 = "31b40e853ab846b431f7cc1d0b160efe6310a3acaaf6239dd33295bdf848736f"
+SYSTEM_PROMPT_SHA256 = "afcad88f139e029ad36ef6a7573ffb4148a3b28a15a72826a76477fdc4932510"
+SCHEMA_SHA256 = "84c8fb754611963b7b76bbaae680f39b28ef6616468eea266c3c3c2212b8cf9e"
 
 
 def test_system_prompt_is_pinned_to_prompt_version():
@@ -635,3 +638,28 @@ def test_a_misattributed_result_is_rewritten_before_publishing():
     assert len(fake.prompts) == 2
     assert "Lucas Linderoth: 772" in fake.prompts[1]
     assert "Mathias Hald" in out[0]["body"]
+
+
+def test_the_prompt_and_schema_carry_the_club_section():
+    """HEADINGS feeds three things at once: the SYSTEM_PROMPT text, the Literal
+    in the Section tool schema, and MeetEvaluation's order validator. A heading
+    the model cannot see in the schema is the failure that cost 105 tool calls
+    on one meet."""
+    assert ag.HEADINGS[-1] == "Klubberne"
+    assert len(ag.HEADINGS) == 5
+    assert "Klubberne" in ag.SYSTEM_PROMPT
+    # The two blocks the new rules point at must be named in the prompt, or the
+    # model has no way to know they exist.
+    assert "digest.clubs" in ag.SYSTEM_PROMPT
+    assert "digest.multi_title_swimmers" in ag.SYSTEM_PROMPT
+    # Both versions are in the cache key; a section change that does not move
+    # them republishes four-section text forever.
+    assert (ag.PROMPT_VERSION, ag.SCHEMA_VERSION) == ("7", "3")
+
+
+def test_the_retry_prompt_points_at_the_precomputed_title_count():
+    """The old text told the model to never total up a swimmer's wins. The
+    digest now carries the total, so the instruction has to point at it."""
+    prompt = ag._prompt("{}", misattributed={"Emilie Beckmann: 764"})
+    assert "digest.multi_title_swimmers" in prompt
+    assert "never total up a swimmer's wins" not in prompt
