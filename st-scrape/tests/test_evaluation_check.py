@@ -419,3 +419,32 @@ def test_every_mangling_of_podieplaceringer_is_caught():
         assert check.check_language(f"7 titler og 7 {bad}.", DIGEST) == {bad}
     for good in ("podieplacering", "podieplaceringer", "podieplaceringerne"):
         assert check.check_language(f"7 titler og 7 {good}.", DIGEST) == set()
+
+
+# --- the meet's own date -----------------------------------------------------
+
+DATED = {**DIGEST, "meet": {**DIGEST["meet"], "date": "12-12-2024"}}
+
+
+def test_the_meets_own_date_is_licensed_as_a_date():
+    """Every report opens with the meet date, and meet.date is deliberately not
+    walked for digits — licensing "10" out of "2026-04-10" as a medal count was
+    the original leak. Most meets got away with it by coincidence: the day
+    happened to equal some other digest figure. DM-K/10976 (12-12-2024) has no
+    12 anywhere in its digest, so the check fired on every attempt over a date
+    that was correct, and the meet was unpublishable on every model."""
+    assert check.check_numbers(
+        "DM Kortbane 2024 blev afviklet den 12. december 2024 med 412 deltagere.",
+        DATED) == set()
+    assert check.check_numbers("Stævnet blev afviklet den 12. december.", DATED) == set()
+
+
+def test_the_date_licence_does_not_leak_into_a_count():
+    """The narrow licence is the whole point: the same digits in any other
+    position are still fabricated."""
+    assert check.check_numbers("Klubben vandt 12 titler.", DATED) == {"12"}
+
+
+def test_a_date_that_is_not_the_meets_own_is_still_flagged():
+    assert check.check_numbers("Stævnet blev afviklet den 13. december 2024.",
+                               DATED) == {"13"}
