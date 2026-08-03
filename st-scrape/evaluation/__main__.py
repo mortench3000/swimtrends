@@ -172,7 +172,10 @@ def run(con, out: Path, *, model_id: str, guardrail_id: str, guardrail_version: 
                 cache.put(s3, category, meet_id, key, payload)
                 stats["generated"] += 1
 
-            write_json(out / category / meet_id / "evaluation.json", payload)
+            # Cache the model's own words, publish them as prose (plain_events).
+            published = {**payload, "sections": [
+                {**s, "body": ag.plain_events(s["body"])} for s in payload["sections"]]}
+            write_json(out / category / meet_id / "evaluation.json", published)
             stats["written"] += 1
         except Exception:
             log.exception("evaluation pipeline failed for %s/%s", category, meet_id)
