@@ -354,3 +354,67 @@ def check_genders(text: str, digest: dict) -> set[str]:
         if offered and claimed not in offered:
             offenders.add(f"{word} {distance}m {stroke}")
     return offenders
+
+
+# --- foreign words and digest jargon -----------------------------------------
+# The fourth failure class, and the one no other gate here can see: the prose is
+# not Danish. check_numbers reads digits, check_genders and check_attribution
+# read bindings, and Bedrock's grounding score judges whether a sentence is
+# *supported* — a malformed verb inside a factually correct sentence passes all
+# of them, so a language error used to survive every retry by construction.
+#
+# Haiku 4.5 produced ~60 of these across 40 published reports (Bokmål drift,
+# English intrusion, invented compounds), which is why the batch runs on Sonnet
+# 4.6 now — see docs/analytics.md. This list is the backstop for what a good
+# model still slips through, and it is deliberately a list of *observed* forms
+# rather than a dictionary: Danish compounding is productive, so correct words
+# like "femårsgennemsnittet" appear in no word list and a dictionary gate would
+# reject good prose all day. The cost of that choice is that a brand-new typo
+# passes; the fix is one more entry here, and the offender is named in the
+# refusal message.
+_NOT_DANISH = frozenset({
+    # Norwegian/Swedish forms, all seen in published reports.
+    "hadde", "blant", "antall", "basert", "deltakere", "deltakertal",
+    "deltakermedian", "deltakelsen", "etterfulgt", "gjennomsnitt", "grenar",
+    # "historikk" only — Danish has "historik", so "historikken" is the correct
+    # definite form and flagging it would have re-rolled 20 good reports.
+    "greningrupper", "historikk", "høyeste", "høyest",
+    "medalievinnere", "medaljespeilet", "medianpoeng", "oppgikk", "oppnådde",
+    "plass", "plasseringer", "poengsum", "prestation", "representert",
+    "sammensetning", "seire", "sesongers", "vant", "økning",
+    # Digest field names and English technical tokens — rule 8 already forbids
+    # these, and they still arrive verbatim ("digest.derived angiver 0 procent",
+    # "negative deltas", "over 46 events").
+    "digest", "derived", "deltas", "deltaer", "events", "stroke", "strokes",
+    "strokearter", "stroketyper", "slagarter", "podiums", "performance",
+    "longdistancer", "longbanenivået", "mediumdistance", "mediemdistance",
+    "langtidsstroker",
+    # Invented words and transpositions. Each one was published.
+    "bredtevældet", "brystsvømmingen", "conquisterede", "flageslagsdiscipliner",
+    "frisvømming", "frisvømmingen", "førtede", "guldmedajer", "herernes",
+    "herremændenes", "højteste", "langtbane", "mediaanresultat",
+    "deltagtallet", "mødetets", "pokaljepladser", "sichrede", "sprintintersvig",
+    "stemmmer", "topede", "topsværgmelser", "umplaceringer", "velrepsentierede",
+    "vindersømmninger",
+})
+_WORD = re.compile(r"[A-Za-zÆØÅæøå]+")
+# One word this model mangles reliably and *differently* every time —
+# podieplacerigner, podieplacerringer, podieplaceriger, podieplaceriner in four
+# reports. Enumerating misspellings loses that race; every correct form
+# continues "podieplacer" with "ing", so the negative lookahead catches the
+# whole family, including the ones not written yet.
+_MANGLED = re.compile(r"\bpodieplacer(?!ing)[a-zæøå]*", re.IGNORECASE)
+
+
+def check_language(text: str, digest: dict) -> set[str]:
+    """Words in `text` that are not Danish, or are digest jargon.
+
+    Words the digest itself uses as a name are never flagged: the list is blind
+    to proper nouns, and a swimmer called "Vant" or a club called "Plass Swim"
+    would otherwise be rewritten forever.
+    """
+    names = " ".join(_named_swimmers(digest) | _club_names(digest)).lower()
+    proper = set(_WORD.findall(names))
+    found = {w.lower() for w in _WORD.findall(text or "")} & _NOT_DANISH
+    found |= {m.group(0).lower() for m in _MANGLED.finditer(text or "")}
+    return found - proper

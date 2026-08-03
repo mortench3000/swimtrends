@@ -362,3 +362,60 @@ def test_club_aggregates_are_not_treated_as_a_swimmers_result():
          "clubs": [{"club": "AGF", "swimmers": 3, "titles": 764, "podiums": 1,
                     "rank": 1}]}
     assert "764" not in check.points_owners(d)
+
+
+# --- foreign words and digest jargon -----------------------------------------
+
+def test_a_norwegian_form_is_caught():
+    """Sonnet 4.6 still writes the odd Bokmål form; Haiku wrote them by the
+    dozen. Every other check reads figures or bindings, so nothing saw them."""
+    assert check.check_language("Det samlede deltakertal er 8 pct. lavere.",
+                                DIGEST) == {"deltakertal"}
+
+
+def test_a_digest_field_name_in_the_prose_is_caught():
+    """Rule 8 forbids field names, and DM-L/8609 published "digest.derived
+    angiver en forskel på 0 procent" anyway."""
+    assert check.check_language("Medianen er uændret – digest.derived angiver 0 "
+                                "procent.", DIGEST) == {"digest", "derived"}
+
+
+def test_an_observed_typo_is_caught():
+    """DM-L/7833 wrote "podieplacerigner" three times in one section."""
+    assert check.check_language("7 titler og 7 podieplacerigner fordelt på 3 "
+                                "svømmere.", DIGEST) == {"podieplacerigner"}
+
+
+def test_correct_danish_prose_passes():
+    assert check.check_language(
+        "Femårsgennemsnittet for elitens medianpoint steg, og de "
+        "medaljeplacerede svømmere fordelte sig på fire klubber.", DIGEST) == set()
+
+
+def test_a_digest_name_is_never_flagged_as_foreign():
+    """The word list is blind to proper nouns, so a swimmer or club whose name
+    collides with it would be 'corrected' forever. The digest settles it."""
+    d = {**DIGEST, "top_swims": [{"name": "Nora Vant", "club": "Plass Swim",
+                                  "event": "F 50m Fri (LCM)", "time": "26.10",
+                                  "points": 700, "rank": 1}]}
+    assert check.check_language("Nora Vant fra Plass Swim vandt.", d) == set()
+
+
+def test_the_danish_definite_form_of_historik_is_not_norwegian():
+    """A near-miss that cost 20 good reports a re-roll before it was caught:
+    Danish has "historik", so "historikken" is correct — only the Bokmål
+    "historikk" is not."""
+    assert check.check_language("Det højeste i historikken.", DIGEST) == set()
+    assert check.check_language("Det højeste i historikk.", DIGEST) == {"historikk"}
+
+
+def test_every_mangling_of_podieplaceringer_is_caught():
+    """The word list found this one four different ways ("podieplacerigner",
+    "podieplacerringer", "podieplaceriger", "podieplaceriner") and would have
+    kept finding new ones. Every correct form continues "podieplacer" with
+    "ing", so a prefix rule closes the whole family."""
+    for bad in ("podieplacerigner", "podieplacerringer", "podieplaceriger",
+                "podieplaceriner", "podieplacerer"):
+        assert check.check_language(f"7 titler og 7 {bad}.", DIGEST) == {bad}
+    for good in ("podieplacering", "podieplaceringer", "podieplaceringerne"):
+        assert check.check_language(f"7 titler og 7 {good}.", DIGEST) == set()

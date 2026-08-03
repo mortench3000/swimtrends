@@ -23,7 +23,8 @@ from strands import Agent
 from strands.models import BedrockModel
 
 from evaluation.cache import canonical_json
-from evaluation.check import check_attribution, check_genders, check_numbers
+from evaluation.check import (check_attribution, check_genders, check_language,
+                              check_numbers)
 
 log = logging.getLogger("evaluation")
 
@@ -343,7 +344,8 @@ class OutputGuard:
 
 def _prompt(digest_json: str, offenders: set[str] | None = None,
             blocked: str | None = None, wrong_gender: set[str] | None = None,
-            misattributed: set[str] | None = None) -> str:
+            misattributed: set[str] | None = None,
+            foreign: set[str] | None = None) -> str:
     head = f"<digest>{digest_json}</digest>"
     if offenders:
         bad = ", ".join(sorted(offenders))
@@ -373,6 +375,18 @@ def _prompt(digest_json: str, offenders: set[str] | None = None,
                 f"swimmer to another. A swimmer's title count is "
                 f"digest.multi_title_swimmers[].titles; take it from there "
                 f"rather than counting wins yourself. Rewrite the evaluation.")
+    if foreign:
+        # Quote the words themselves: rule 8 already asked for plain Danish, so
+        # repeating the rule teaches nothing — the model cannot see which word
+        # of its own prose was not Danish.
+        bad = ", ".join(sorted(foreign))
+        return (f"{head}\n"
+                f"Your previous answer used words that are not correct Danish, "
+                f"or are field names from the digest: {bad}. Rewrite the "
+                f"evaluation in plain Danish prose. Every word must be a real, "
+                f"correctly inflected Danish word — never Norwegian or Swedish, "
+                f"never English, and never a name from the digest's structure "
+                f"(\"digest\", \"derived\", \"deltas\", \"events\").")
     if blocked:
         # The model cannot see the guardrail's verdict, so name the section and
         # the offence. Grounding is what fails here in practice: a section that
@@ -434,7 +448,8 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
                                offenders if attempt else None,
                                blocked if attempt else None,
                                wrong_gender if attempt else None,
-                               misattributed if attempt else None),
+                               misattributed if attempt else None,
+                               foreign if attempt else None),
                        structured_output_model=MeetEvaluation,
                        limits=LIMITS)
         # A block is a failure, not a fallback — and it must be detected
@@ -465,7 +480,10 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
         # Same class as the gender flip: a real figure bound to the wrong
         # athlete, invisible to both the number check and the guardrail.
         misattributed = check_attribution(text, digest)
-        if not offenders and not wrong_gender and not misattributed:
+        # The fourth class, invisible to the three above and to grounding: the
+        # prose is not Danish ("Klubben førtede medaljeantallet").
+        foreign = check_language(text, digest)
+        if not offenders and not wrong_gender and not misattributed and not foreign:
             sections = [{"heading": s.heading, "body": s.body}
                         for s in report.sections]
             # Last gate before the caller caches and publishes this text.
@@ -480,6 +498,10 @@ def evaluate(digest: dict, *, agent, guard: OutputGuard, retries: int = 3) -> li
         raise EvaluationError(
             f"wrong gender on {sorted(wrong_gender)} after "
             f"{retries + 1} attempts")
+    if foreign:
+        raise EvaluationError(
+            f"words that are not Danish after {retries + 1} attempts: "
+            f"{sorted(foreign)}")
     if blocked:
         raise EvaluationError(
             f"the guardrail blocked the section {blocked!r} after "

@@ -703,3 +703,27 @@ def test_clubs_rule_does_not_overclaim_on_the_junior_path():
 ])
 def test_plain_events(raw, want):
     assert ag.plain_events(raw) == want
+
+
+def test_non_danish_prose_is_rewritten_before_publishing():
+    """The fourth failure class. Haiku published "Agfs Svømmeafdeling førtede
+    medaljeantallet" — every figure real, the guardrail content-grounded, and
+    "førtede" is not a Danish word. Nothing gated language until now."""
+    fake = FakeAgent(_sections("Klubben førtede med 612 point."),   # not Danish
+                     _sections("Klubben førte med 612 point."))     # fixed
+    out = ag.evaluate(DIGEST, agent=fake, guard=_guard())
+    assert len(fake.prompts) == 2
+    assert "førtede" in fake.prompts[1]          # the word is quoted back
+    assert "førte" in out[0]["body"]
+
+
+def test_non_danish_prose_that_survives_every_retry_raises():
+    fake = FakeAgent(*[_sections("Klubben førtede med 612 point.") for _ in range(2)])
+    with pytest.raises(ag.EvaluationError, match="not Danish"):
+        ag.evaluate(DIGEST, agent=fake, guard=_guard(), retries=1)
+
+
+def test_the_language_retry_prompt_names_the_rule_it_broke():
+    prompt = ag._prompt("{}", foreign={"digest", "derived"})
+    assert "derived, digest" in prompt          # sorted, like every other branch
+    assert "dansk" in prompt.lower() or "Danish" in prompt
