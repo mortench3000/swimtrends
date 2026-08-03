@@ -791,3 +791,19 @@ def test_plain_prose_swaps_the_english_terms_with_a_fixed_danish_word():
         assert ag.plain_prose(raw) == want
     # Sentence-initial keeps its capital.
     assert ag.plain_prose("Events fordelte sig jævnt.") == "Discipliner fordelte sig jævnt."
+
+
+def test_plain_prose_covers_the_whole_counted_swimmers_and_podium_families():
+    """Both families came back in new spellings after the first fix: rule 10's
+    "counted swimmers" as tællede/tællesvømmere, and the podium word as
+    palleplaceringer (a pallet). Families, not spellings — again."""
+    for bad in ("31 tællende svømmere", "31 tællede svømmere", "31 tællesvømmere"):
+        assert ag.plain_prose(f"18 podiepladser og {bad}.") == (
+            "18 podiepladser og 31 svømmere."), bad
+    assert ag.plain_prose("8 titler, 17 palleplaceringer og 32 svømmere.") == (
+        "8 titler, 17 podiepladser og 32 svømmere.")
+    assert ag.plain_prose("mod et femårsnit på 518 point") == (
+        "mod et femårssnit på 518 point")
+    # "tæller" as a verb is untouched: it is always followed by a count, never
+    # by "svømmere" directly.
+    assert ag.plain_prose("Stævnet tæller 265 juniorer.") == "Stævnet tæller 265 juniorer."
