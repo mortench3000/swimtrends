@@ -203,6 +203,45 @@ _JUNIOR_CLUBS_SQL = f"""
     ORDER BY rank LIMIT {CLUB_N}
 """
 
+MIN_TITLES = 3
+
+# Canonical stroke order, the same one the SPA's race filter uses. Not
+# alphabetical and not order of appearance: both vary, and the digest has to be
+# byte-stable.
+_STROKE_ORDER = ("Fri", "Ryg", "Bryst", "Fly", "IM", "HM")
+
+# Swimmers with MIN_TITLES or more individual titles at this meet, one row per
+# winning swim. NO LIMIT: a cutoff is the defect this block fixes. Ranking by
+# points hides exactly the rarest achievement -- points run higher in sprint
+# free and fly than in breast and IM, so a single-event specialist takes a
+# top_swims slot at 822 while four titles across three strokes at 715-764 takes
+# none (DM-L/10334, Mathias Christensen).
+#
+# The ORDER BY is total (swimmer_id last), and it also groups each swimmer's
+# rows together so _multi_title_swimmers can fold them in one pass.
+# params: category, meet_id
+_MULTI_TITLE_SQL = f"""
+    SELECT swimmer_id, name, club, event, stroke, points,
+           count(*) OVER (PARTITION BY swimmer_id) AS titles
+    FROM results_by_category
+    WHERE category = ? AND meet_id = ? AND class = 'open'
+      AND {_FINAL_PHASES} AND rank = 1 AND swimmer_id IS NOT NULL
+    QUALIFY titles >= {MIN_TITLES}
+    ORDER BY titles DESC, name, swimmer_id, points DESC, event
+"""
+
+# params: meet_id
+# junior_championship holds at most one row per swimmer per event (it filters
+# phase IN ('heats', 'timed_final')), so counting rows counts titles.
+_JUNIOR_MULTI_TITLE_SQL = f"""
+    SELECT swimmer_id, name, club, event, stroke, points,
+           count(*) OVER (PARTITION BY swimmer_id) AS titles
+    FROM junior_championship
+    WHERE meet_id = ? AND junior_rank = 1
+    QUALIFY titles >= {MIN_TITLES}
+    ORDER BY titles DESC, name, swimmer_id, points DESC, event
+"""
+
 # median points this season vs the mean of the prior seasons in the window.
 # `oldest` is history[-1]["season"] — the on-record window already computed
 # for season_history — NOT season - 5, since a category may have gaps.
@@ -284,6 +323,33 @@ def _with_stroke_deltas(rows: list[dict]) -> list[dict]:
     return rows
 
 
+def _multi_title_swimmers(rows) -> list[dict]:
+    """Per-win rows -> one dict per swimmer, order preserved.
+
+    Grouped on swimmer_id, which is NOT emitted (the digest names no ids): two
+    swimmers sharing a name must not merge into one four-title swimmer. An
+    unknown stroke sorts last rather than raising -- a curate surprise should
+    not take down the whole batch.
+    """
+    out: list[dict] = []
+    by_id: dict[str, dict] = {}
+    for swimmer_id, name, club, event, stroke, points, titles in rows:
+        row = by_id.get(swimmer_id)
+        if row is None:
+            row = {"name": name, "club": club, "titles": titles,
+                   "strokes": [], "wins": []}
+            by_id[swimmer_id] = row
+            out.append(row)
+        if stroke not in row["strokes"]:
+            row["strokes"].append(stroke)
+        row["wins"].append({"event": event, "points": points})
+    for row in out:
+        row["strokes"].sort(
+            key=lambda s: (_STROKE_ORDER.index(s) if s in _STROKE_ORDER
+                           else len(_STROKE_ORDER), s))
+    return out
+
+
 def build(con, category: str, meet_id: str) -> dict:
     junior = category == "DMJ-L" and _meet_is_combined(con, meet_id)
     head = con.execute(_HEAD_SQL, [category, meet_id]).fetchone()
@@ -327,11 +393,13 @@ def build(con, category: str, meet_id: str) -> dict:
         strokes = con.execute(_JUNIOR_BY_STROKE_SQL,
                               [oldest, season, season, season]).fetchall()
         clubs = con.execute(_JUNIOR_CLUBS_SQL, [meet_id]).fetchall()
+        multi = con.execute(_JUNIOR_MULTI_TITLE_SQL, [meet_id]).fetchall()
     else:
         top = con.execute(_TOP_SWIMS_SQL, [category, meet_id]).fetchall()
         strokes = con.execute(_BY_STROKE_SQL,
                               [category, oldest, season, season, season]).fetchall()
         clubs = con.execute(_CLUBS_SQL, [category, meet_id]).fetchall()
+        multi = con.execute(_MULTI_TITLE_SQL, [category, meet_id]).fetchall()
 
     return {
         "meet": {"name": head[0], "date": head[1], "season": season,
@@ -340,6 +408,7 @@ def build(con, category: str, meet_id: str) -> dict:
         "season_history": history,
         "top_swims": [dict(zip(swim_cols, r)) for r in top],
         "clubs": [dict(zip(club_cols, r)) for r in clubs],
+        "multi_title_swimmers": _multi_title_swimmers(multi),
         "by_stroke": _with_stroke_deltas([dict(zip(stroke_cols, r)) for r in strokes]),
         "derived": _derived(facts, history),
     }

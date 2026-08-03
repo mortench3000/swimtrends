@@ -214,3 +214,69 @@ def test_clubs_on_the_junior_path_uses_junior_ranks():
     d = digest.build(junior_multi_title_con(), "DMJ-L", "JM2026")
     assert [(c["club"], c["titles"], c["podiums"], c["swimmers"])
             for c in d["clubs"]] == [("AGF", 3, 3, 1), ("VEST", 0, 3, 1)]
+
+
+def test_multi_title_swimmers_surfaces_a_sweep_the_points_cutoff_hides():
+    """The DM-L/10334 defect: Mathias Christensen won four finals across three
+    strokes at 715-764 while the 10th top_swims slot sat at 779, so the model
+    never saw his name and could not have counted his titles anyway."""
+    d = digest.build(multi_title_con(), "DM-L", "M2026")
+    first = d["multi_title_swimmers"][0]
+    assert first == {
+        "name": "Mathias Christensen",
+        "club": "Sigma Swim Allerød",
+        "titles": 4,
+        "strokes": ["Bryst", "Fly", "IM"],          # canonical order, not entry order
+        "wins": [{"event": "M 200m IM (LCM)", "points": 764},
+                 {"event": "M 100m Fly (LCM)", "points": 729},
+                 {"event": "M 200m Bryst (LCM)", "points": 725},
+                 {"event": "M 400m IM (LCM)", "points": 715}],
+    }
+    # His 100m Bryst second place is not a title and is not among the wins.
+    assert 690 not in [w["points"] for w in first["wins"]]
+
+
+def test_multi_title_swimmers_applies_the_threshold_and_orders_the_block():
+    d = digest.build(multi_title_con(), "DM-L", "M2026")
+    assert [(s["name"], s["titles"]) for s in d["multi_title_swimmers"]] == [
+        ("Mathias Christensen", 4),
+        ("Anders Andersen", 3),      # tie on titles broken by name
+        ("Anna Testsen", 3),
+    ]
+    # Two titles is below MIN_TITLES; a heat win and a para swim are not titles.
+    named = {s["name"] for s in d["multi_title_swimmers"]}
+    assert not named & {"Dobbelt Vinder", "Heat Winner", "Para Swimmer",
+                        "Dead Heat A", "Dead Heat B"}
+
+
+def test_multi_title_strokes_are_distinct_and_canonically_ordered():
+    d = digest.build(multi_title_con(), "DM-L", "M2026")
+    anna = next(s for s in d["multi_title_swimmers"] if s["name"] == "Anna Testsen")
+    assert anna["strokes"] == ["Fri", "Ryg"]     # entered Ryg, Ryg, Fri
+    anders = next(s for s in d["multi_title_swimmers"]
+                  if s["name"] == "Anders Andersen")
+    assert anders["strokes"] == ["Fri"]          # three Fri titles, one entry
+
+
+def test_multi_title_swimmers_is_empty_when_nobody_sweeps():
+    """Not a failure: every swimmer in this fixture wins at most one event."""
+    d = digest.build(digest_con(), "DM-L", "D2026")
+    assert d["multi_title_swimmers"] == []
+
+
+def test_multi_title_swimmers_on_the_junior_path_reports_juniors_only():
+    """Senior Sweeper wins all three finals with more points than any junior.
+    On the junior path the title is the heats result, so he must be absent."""
+    d = digest.build(junior_multi_title_con(), "DMJ-L", "JM2026")
+    assert [(s["name"], s["titles"]) for s in d["multi_title_swimmers"]] == [
+        ("Junior Jens", 3)]
+    assert d["multi_title_swimmers"][0]["strokes"] == ["Fri", "Ryg"]
+
+
+def test_both_new_blocks_are_deterministic_across_repeated_builds():
+    """Both feed the evaluation cache key, so an unstable row set silently
+    invalidates cached reports and pays to regenerate them."""
+    con = multi_title_con()
+    builds = [digest.build(con, "DM-L", "M2026") for _ in range(6)]
+    for key in ("clubs", "multi_title_swimmers"):
+        assert all(b[key] == builds[0][key] for b in builds), f"{key} is unstable"
