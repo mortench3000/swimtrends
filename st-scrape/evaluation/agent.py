@@ -31,7 +31,13 @@ PROMPT_VERSION = "7"
 SCHEMA_VERSION = "3"
 
 REGION = "eu-west-1"
-MAX_TOKENS = 1200
+# 4000, not 1200: Haiku's five sections fit in 1200, Sonnet 4.6's do not — it
+# spends ~2000 on the same 300-word brief, and every one of 41 meets died on
+# MaxTokensReachedException (which strands raises instead of returning the
+# partial report, so the meet is skipped and its published page is dropped).
+# The real length control is the word budget in SYSTEM_PROMPT; this is only the
+# ceiling. It is in the cache key, so raising it regenerates every meet.
+MAX_TOKENS = 4000
 
 # The spend ceiling for one meet, passed to every agent invocation. A healthy
 # meet takes one turn of ~3k input + ~700 output tokens, and the retry path adds

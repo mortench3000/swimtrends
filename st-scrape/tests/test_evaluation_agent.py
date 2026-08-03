@@ -429,7 +429,7 @@ def test_build_agent_wires_region_model_and_a_numbered_guardrail(monkeypatch):
     assert seen["model_id"] == "model-x"
     assert seen["guardrail_id"] == "gr-1"
     assert seen["guardrail_version"] == "3"
-    assert seen["max_tokens"] == 1200
+    assert seen["max_tokens"] == ag.MAX_TOKENS
 
 
 def test_build_agent_silences_the_streamed_tool_and_text_chatter(monkeypatch, capsys):
