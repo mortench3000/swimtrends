@@ -188,10 +188,47 @@ earliest meet on record (no prior season history):
 | Ministral 3 8B (`mistral.ministral-3-8b-instruct`) | 1 of 3 | ~$0.0010 | fabricated figures; broken Danish |
 | Claude Sonnet 5 (`eu.anthropic.claude-sonnet-5`) | — | — | not available for this account |
 
-`EVAL_MODEL_ID` should be set to the chosen Haiku id above. The `$/meet` figures
-are **model tokens only** — Bedrock Guardrails are billed separately per text
-unit, and the guardrail is now applied to the output as well as the input, so
-the real cost per generated meet is a little higher than the table says.
+The `$/meet` figures are **model tokens only** — Bedrock Guardrails are billed
+separately per text unit, and the guardrail is now applied to the output as well
+as the input, so the real cost per generated meet is a little higher than the
+table says.
+
+#### Haiku 4.5 was replaced by Sonnet 4.6 (2026-08-03)
+
+That comparison scored *facts*, not language, and Haiku's Danish did not hold up
+across a full batch. Counting every word appearing ≤3× across the 40 published
+reports found ~60 non-words in three classes:
+
+* **Bokmål drift** — `hadde`, `blant`, `antall`, `deltakere`, `etterfulgt`,
+  `gjennomsnitt`, `høyeste`, `plasseringer`, `poengsum`, `oppnådde`, `vant`,
+  `økning`, `historikk`, `medaljespeilet`
+* **English intrusion** — `stroketyper`, `mediumdistance`, `longbanenivået`,
+  `podiums`, `performance`
+* **Invented words** — `førtede` (for `førte`), `guldmedajer`,
+  `topsværgmelser`, `sprintintersvig`, `velrepsentierede`, `conquisterede`
+
+Nothing in the pipeline can catch this: `check_numbers` reads digits,
+`check_genders`/`check_attribution` read specific bindings, and the guardrail
+scores *grounding* — a malformed verb in a factually correct sentence still
+scores as supported. All four retry branches cite numbers, gender, attribution
+or a blocked section, so a language error survives every attempt by
+construction. Fluency is the model's job, not a checker's: a gate can reject,
+it cannot write better Danish. A dictionary gate was considered and rejected —
+Danish compounding is productive, so `femårsgennemsnittet` and
+`medaljeplacerede` are correct and in no word list.
+
+`EVAL_MODEL_ID` is therefore `eu.anthropic.claude-sonnet-4-6` (the Makefile
+default). Regenerating all 41 meets on it cost **$2.63** (268k in / 106k out,
+~$0.075/meet, ~11× Haiku) and cut the residue to ~16 sentences in 35 reports —
+mostly transposition typos (`podieplacerigner`), a few Scandinavian forms
+(`deltakertal`, `grenar`, `langtbane`) and digest jargon leaking through rule 8
+(`digest.derived angiver …`, `negative deltas`, `over 46 events`).
+
+One trap when changing the model: `MAX_TOKENS` is sized for the chosen model.
+Sonnet spends ~2000 output tokens on the same 300-word brief where Haiku spent
+under 1200, and strands raises `MaxTokensReachedException` rather than returning
+the partial report — so an undersized ceiling skips *every* meet and
+`_drop_stale` then removes its published page. It is also in the cache key.
 
 ### Guardrail
 

@@ -32,7 +32,12 @@ web-deploy:
 # that goes stale: every policy change publishes a NEW numbered guardrail version,
 # and the version is in the cache key. `?=` so a deliberate export still wins
 # (comparing an old version, say). See docs/analytics.md.
-EVAL_MODEL_ID ?= eu.anthropic.claude-haiku-4-5-20251001-v1:0
+# Sonnet, not Haiku: Haiku 4.5's Danish drifted into Bokmål ("hadde", "blant",
+# "antall", "plasseringer"), English ("stroketyper", "podiums") and invented
+# words ("førtede", "guldmedajer", "topsværgmelser") across every published
+# report. No gate can see that — grounding scores content, not morphology — and
+# fluency is the model's job, not a checker's.
+EVAL_MODEL_ID ?= eu.anthropic.claude-sonnet-4-6
 EVAL_GUARDRAIL_ID ?= $(shell aws cloudformation describe-stacks \
 	--stack-name SwimtrendsEvaluationStack $(AWS_PROFILE_FLAG) --region eu-west-1 \
 	--query "Stacks[0].Outputs[?OutputKey=='GuardrailId'].OutputValue" --output text)
