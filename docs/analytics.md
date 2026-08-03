@@ -230,6 +230,30 @@ under 1200, and strands raises `MaxTokensReachedException` rather than returning
 the partial report — so an undersized ceiling skips *every* meet and
 `_drop_stale` then removes its published page. It is also in the cache key.
 
+### The language gate (`check.check_language`)
+
+The backstop for what a good model still slips through, added with the switch.
+It flags three closed classes — Scandinavian forms (`deltakertal`, `grenar`),
+digest field names and English tokens (`digest.derived`, `deltas`, `events`),
+and observed typos (`topede`, `stemmmer`) — subtracting any word the digest uses
+as a *name*, so a swimmer called `Vant` is never rewritten. A hit retries like a
+fabricated number does, with the offending words quoted back.
+
+Three things about it are deliberate:
+
+* **A list of observed forms, not a dictionary.** Danish compounding is
+  productive, so correct words like `femårsgennemsnittet` are in no word list.
+  The cost is that a novel typo passes; the refusal names it, and adding it is
+  one line.
+* **One prefix rule where a list cannot win.** The model mangles
+  `podieplaceringer` differently every time (four spellings so far), and every
+  correct form continues `podieplacer` with `ing` — so `_MANGLED` matches the
+  family, not the instances.
+* **Run any new entry over the published corpus before trusting it.** A first
+  draft listed `historikken`; Danish has `historik`, so that is the correct
+  definite form and only Bokmål `historikk` is wrong. It would have re-rolled 20
+  good reports.
+
 ### Guardrail
 
 `SwimtrendsEvaluationStack` defines one guardrail: four denied topics
