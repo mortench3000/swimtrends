@@ -130,3 +130,56 @@ def test_report_still_raises_on_a_real_io_error(con):
     with pytest.raises(duckdb.Error):
         traffic.report(con, "s3://swimtrends-web-logs/cf/*.gz",
                        since=date(2026, 7, 1))
+
+
+SCANNER = ("Mozilla/5.0%20(Windows%20NT%2010.0;%20Win64;%20x64)"
+           "%20AppleWebKit/537.36%20(KHTML,%20like%20Gecko)%20Chrome/91.0")
+
+
+@pytest.fixture
+def probes(tmp_path):
+    """Real scanner paths seen in the live logs on 2026-08-02/03. All end in a
+    slash or a lowercase segment, so the old extension-only filter kept them."""
+    _write(tmp_path, "probe.gz", [
+        _row("2026-08-01", "/.tmb/", SCANNER),
+        _row("2026-08-01", "/.well-known/acme-challenge/", SCANNER),
+        _row("2026-08-01", "/admin/fckeditor/editor/filemanager/", SCANNER),
+        _row("2026-08-01", "/admin/uploads/images/", SCANNER),
+        _row("2026-08-01", "/administrator/", SCANNER),
+        _row("2026-08-01", "/wp-content/plugins/", SCANNER),
+        # …and the real routes, which must survive.
+        _row("2026-08-01", "/", CHROME),
+        _row("2026-08-01", "/DM-L", CHROME),
+        _row("2026-08-01", "/DM-L/7833", CHROME),
+        _row("2026-08-01", "/DM-L/7833/F-400-IM-LCM", CHROME),
+        _row("2026-08-01", "/DO/10969/M-1500-Fri-LCM", CHROME),
+        _row("2026-08-01", "/DMJ-K/10339/index.html", CHROME),
+    ])
+    return str(tmp_path / "probe.gz")
+
+
+def test_scanner_probe_paths_are_excluded(con, probes):
+    paths = {r["path"] for r in traffic.report(
+        con, probes, since=date(2026, 7, 1))["by_path"]}
+    assert paths == {"/", "/DM-L", "/DM-L/7833", "/DM-L/7833/F-400-IM-LCM",
+                     "/DO/10969/M-1500-Fri-LCM", "/DMJ-K/10339"}
+
+
+def test_probe_traffic_does_not_inflate_the_human_count(con, probes):
+    day = traffic.report(con, probes, since=date(2026, 7, 1))["by_day"]
+    # 6 real routes, not 12: the six probes are gone.
+    assert day == [{"date": date(2026, 8, 1), "human": 6, "bot": 0}]
+
+
+@pytest.mark.parametrize("agent", [
+    "Mozilla/5.0%20(compatible;%20Dataprovider.com)",
+    "Mozilla/5.0%20(compatible;%20CMS-Checker/1.0;%20+https://example.com)",
+    "Mozilla/5.0%20(compatible;%20InternetMeasurement/1.0)",
+    # Google's non-search crawler: no 'bot' token anywhere in the UA.
+    "Mozilla/5.0%20(Linux;%20Android%206.0.1)%20Chrome/150.0"
+    "%20Mobile%20Safari/537.36%20(compatible;%20GoogleOther)",
+])
+def test_named_commercial_crawlers_count_as_bots(con, tmp_path, agent):
+    p = _write(tmp_path, "c.gz", [_row("2026-08-01", "/DM-L/7833", agent)])
+    day = traffic.report(con, str(p), since=date(2026, 7, 1))["by_day"]
+    assert day == [{"date": date(2026, 8, 1), "human": 0, "bot": 1}]

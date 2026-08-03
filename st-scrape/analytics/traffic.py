@@ -25,8 +25,29 @@ LOG_COLUMNS = [
 
 # ponytail: substring match on the user agent. Well-behaved crawlers identify
 # themselves and land in the bot column; anything spoofing Chrome counts as
-# human. Swap in a maintained UA list only if the split visibly misleads.
-BOT_RE = "(?i)bot|crawl|spider|slurp"
+# human. `dataprovider|checker|measurement` are named commercial crawlers that
+# request real routes, so the route whitelist below cannot catch them. Add a
+# token when a new one shows up in the per-agent breakdown; don't try to
+# enumerate the world.
+# `google` is there because Google's non-search crawler identifies as
+# `GoogleOther` (and the inspection tool as `Google-InspectionTool`) — neither
+# contains 'bot', so they landed in the human column. Browser UAs never contain
+# 'google'; Chrome identifies itself as Chrome.
+BOT_RE = ("(?i)bot|crawl|spider|slurp"
+          "|google|dataprovider|checker|measurement")
+
+# The site's own route shapes: '/', '/<CAT>', '/<CAT>/<meetId>',
+# '/<CAT>/<meetId>/<raceKey>' — matched against the path *after* /index.html is
+# stripped. This is a whitelist on purpose: asserting what our routes look like
+# is far more robust than guessing which user agents are scanners. Vulnerability
+# probes (/.tmb/, /admin/uploads/images/, /.well-known/acme-challenge/) end in a
+# slash rather than a file extension, so an extension-based filter let ~60 of
+# them a day through and reported them as human page views.
+# ponytail: the category segment is matched as uppercase letters + one optional
+# -X suffix (DM-L, DMJ-K, DO), not against the live category list, which exists
+# only in the data. That is also what excludes the lowercase junk. A future
+# lowercase category code would be dropped silently — widen this if one appears.
+ROUTE_RE = r"^/([A-Z]{2,4}(-[A-Z])?(/[0-9]+(/[A-Za-z0-9-]+)?)?)?/?$"
 
 
 def default_path(bucket):
@@ -43,11 +64,11 @@ def _pages_cte():
     r"""CTE narrowing the raw log to one row per *page* view.
 
     - sc_status 200/304 and GET: skip redirects, errors and preflights.
-    - last path segment without a dot (or ending .html): keeps /DM-L/12486 and
-      / while dropping /assets/*.js and /data/*.json, which would otherwise
-      outnumber the pages several to one.
-    - /index.html is folded away: cloudfront/viewer_request.js appends it to
-      extensionless paths, so the same page can appear both ways.
+    - /index.html is folded away first: cloudfront/viewer_request.js appends it
+      to extensionless paths, so the same page can appear both ways.
+    - the normalised path must then match ROUTE_RE, which keeps the site's own
+      routes and drops both static assets (/assets/*.js, /data/*.json) and
+      scanner probes (/.tmb/, /admin/uploads/images/).
     - referrer reduced to its host, minus a www. prefix; missing/'-' becomes
       '(direct)'.
     """
@@ -55,7 +76,7 @@ def _pages_cte():
     WITH raw AS (
         SELECT * FROM read_csv(?, delim='\t', header=false, skip=2,
                                columns={_columns_struct()})
-    ), pages AS (
+    ), norm AS (
         SELECT
             CAST(date AS DATE) AS day,
             coalesce(nullif(
@@ -68,9 +89,9 @@ def _pages_cte():
         FROM raw
         WHERE sc_status IN ('200', '304')
           AND cs_method = 'GET'
-          AND (regexp_matches(cs_uri_stem, '/[^/.]*$')
-               OR cs_uri_stem LIKE '%.html')
           AND CAST(date AS DATE) >= ?
+    ), pages AS (
+        SELECT * FROM norm WHERE regexp_matches(path, '{ROUTE_RE}')
     )
     """
 
