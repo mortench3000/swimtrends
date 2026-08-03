@@ -185,7 +185,14 @@ def model_label(model_id: str) -> str:
     return MODEL_LABELS.get(model_id, model_id)
 
 
-# --- publish-time event labels -----------------------------------------------
+# --- publish-time prose ------------------------------------------------------
+# Wording the checks cannot judge: the numbers are real, the words are Danish
+# and the sentence is grounded, so only the phrasing is wrong. Fixed here rather
+# than in the prompt because that keeps the cached text (and the
+# number/gender/attribution verdicts that ran on it) untouched, needs no
+# PROMPT_VERSION bump, and cleans up every already-generated report on the next
+# cache-hit run.
+#
 # The digest indexes events as "M 100m Fri (LCM)" — gender marker plus course —
 # and rule 9 makes the model carry the gender through, which it often does by
 # copying the marker verbatim. That reads as machine output in Danish prose.
@@ -197,10 +204,27 @@ _COURSE = re.compile(r" \((?:LCM|SCM)\)")
 # X is the mixed relay: only one event of its kind, so dropping the marker
 # loses nothing that needs a Danish word.
 _GENDER_WORD = {"M": "herrernes", "F": "damernes", "X": ""}
+# "31 tællende svømmere" (DM-L/10334). digest.clubs[].swimmers is simply how many
+# of the club's swimmers competed, but rule 10 calls it "the swimmers the digest
+# counted" and the model reached for the Danish idiom for counting toward a
+# standing ("tællende kampe"), which implies an eligibility filter that does not
+# exist. The same section already writes the plain form ("fra 7 svømmere").
+# ponytail: drop the word, don't re-case — the model writes this after a numeral,
+# never sentence-initially. Rule 10's wording is the cause and is worth fixing on
+# the next PROMPT_VERSION bump.
+_COUNTED = re.compile(r"\btællende (svømmere)", re.IGNORECASE)
+# Em- and en-dashes become a plain hyphen. The en-dash is not only typography:
+# the model writes club names with it ("GTI – Greve") where the digest — and so
+# the page, and check_attribution's masking — has "GTI - Greve".
+_DASHES = str.maketrans({"—": "-", "–": "-"})
 
 
-def plain_events(text: str) -> str:
-    """Digest event labels as prose: "M 100m Fri (LCM)" -> "herrernes 100m Fri"."""
+def plain_prose(text: str) -> str:
+    """Digest labels and jargon as Danish prose.
+
+    "M 100m Fri (LCM)" -> "herrernes 100m Fri"; "31 tællende svømmere" -> "31
+    svømmere".
+    """
     def sub(m):
         word = _GENDER_WORD[m.group(1)]
         if not word:
@@ -210,7 +234,8 @@ def plain_events(text: str) -> str:
         if not head or head[-1] in ".:!?":
             word = word.capitalize()
         return f"{word} "
-    return _COURSE.sub("", _MARKER.sub(sub, text))
+    out = _COUNTED.sub(r"\1", _COURSE.sub("", _MARKER.sub(sub, text)))
+    return out.translate(_DASHES)
 
 
 def _numbered_guardrail(guardrail_id: str, guardrail_version: str) -> tuple[str, str]:
