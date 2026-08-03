@@ -56,19 +56,42 @@ location — a local path works, which is how the tests run.
 
 ## Reading it honestly
 
-**Only page requests are counted.** The filter is `sc-status` 200 or 304,
-method `GET`, and a URL whose last segment has no file extension or ends in
-`.html`. Without it, `/assets/*.js` and `/data/*.json` outnumber real pages by
-roughly fifty to one and the tables become useless.
+**Only the site's own routes are counted.** After `sc-status` 200/304 and
+method `GET`, the path must match `ROUTE_RE` — `/`, `/<CAT>`,
+`/<CAT>/<meetId>`, or `/<CAT>/<meetId>/<raceKey>`. This is a **whitelist on
+purpose**: asserting what our routes look like is far more robust than guessing
+which user agents are scanners. It drops `/assets/*.js` and `/data/*.json`, and
+it drops vulnerability probes like `/.tmb/` and
+`/admin/fckeditor/editor/filemanager/` that an extension-based filter let
+through — one scanner made ~60 such requests in a day, all counted as human
+page views until this was fixed.
 
-**`/index.html` is folded away.** `/DM-L/12486` and `/DM-L/12486/index.html`
-are one page. (In practice CloudFront logs the URL *as requested*, before
-`viewer_request.js` appends the suffix, so this rarely fires — it is insurance.)
+The category segment is matched structurally (uppercase letters plus one
+optional `-X` suffix: `DM-L`, `DMJ-K`, `DO`) rather than against the live
+category list, which exists only in the data. That is also what excludes the
+lowercase junk. A future *lowercase* category code would be dropped silently —
+widen `ROUTE_RE` if one ever appears.
+
+**`/index.html` is folded away** before the route match. `/DM-L/12486` and
+`/DM-L/12486/index.html` are one page. (In practice CloudFront logs the URL *as
+requested*, before `viewer_request.js` appends the suffix, so this rarely fires
+— it is insurance.)
 
 **"bot" is a substring match** on the user agent — `bot`, `crawl`, `spider`,
-`slurp`. Honest crawlers identify themselves. A scanner posing as Chrome counts
-as human, and `curl` counts as human. Treat the split as a strong hint, not a
-measurement.
+`slurp`, plus `google`, `dataprovider`, `checker` and `measurement`. The last
+four exist because those crawlers request *real* routes, so no path filter can
+catch them:
+
+- **`google`** is there because Google's **non-search** crawler identifies as
+  `GoogleOther` and its inspection tool as `Google-InspectionTool` — neither
+  contains `bot`. Twelve Google requests were counted as human before this was
+  added. Browser user agents never contain `google`; Chrome says `Chrome`.
+- **`dataprovider|checker|measurement`** cover named commercial crawlers seen in
+  the live logs (Dataprovider.com, CMS-Checker, InternetMeasurement).
+
+Add a token when a new one shows up in the per-agent breakdown; don't try to
+enumerate the world. A scanner posing as Chrome still counts as human, and
+`curl` counts as human. Treat the split as a strong hint, not a measurement.
 
 **Your own visits count.** There is no cookie and no way to exclude yourself.
 On a site this quiet, assume a meaningful share of the human column is you.
@@ -146,10 +169,13 @@ turns the 403/404 into a 200 serving `index.html`, and the SPA renders the route
 client-side. `Error` here means "the origin had nothing", not "the visitor saw a
 failure".
 
-**Requests for `/.env`, `/wp-login.php` and similar.** Vulnerability scanners,
-usually spoofing a browser user agent. They have a dot in the last path segment,
-so the page filter already drops them. Nothing is exposed — the bucket is
-private and served through OAC.
+**Requests for `/.env`, `/wp-login.php`, `/.tmb/`, `/administrator/` and
+similar.** Vulnerability scanners, usually spoofing a browser user agent and
+arriving from cloud IP ranges. `ROUTE_RE` drops all of them. Nothing is exposed
+— the bucket is private and served through OAC. They are, however, the reason
+the residual human count is not zero: a scanner that requests only `/` with a
+Chrome user agent is indistinguishable from a person, which is the documented
+ceiling of user-agent matching.
 
 **An empty report right after a deploy.** CloudFront delivers logs several times
 an hour and reserves the right to take 24 hours. In practice the first files
