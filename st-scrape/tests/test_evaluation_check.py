@@ -291,3 +291,74 @@ def test_a_range_endpoint_is_not_an_attribution():
     assert check.check_attribution(text, ATTRIB) == set()
     assert check.check_attribution(
         "Lucas Linderoth præsterede på 763–772 point.", ATTRIB) == set()
+
+
+_ENTITY_DIGEST = {
+    "meet": {"name": "DM Langbane 2023", "date": "2023-04-10"},
+    "facts": {"entrants": 412, "median_points": 612, "top_points": 764},
+    "season_history": [],
+    "top_swims": [
+        {"name": "Emilie Beckmann", "club": "Swim Team Odense",
+         "event": "F 50m Fly (LCM)", "time": "26.10", "points": 822, "rank": 1},
+    ],
+    "clubs": [
+        {"club": "Svømmeklubben MK31", "swimmers": 14, "titles": 5,
+         "podiums": 11, "rank": 1},
+        {"club": "A6 JGI-Swim", "swimmers": 9, "titles": 2, "podiums": 6,
+         "rank": 2},
+    ],
+    "multi_title_swimmers": [
+        {"name": "Mathias Christensen", "club": "Sigma Swim Allerød",
+         "titles": 4, "strokes": ["Bryst", "Fly", "IM"],
+         "wins": [{"event": "M 200m IM (LCM)", "points": 764},
+                  {"event": "M 100m Fly (LCM)", "points": 729}]},
+    ],
+    "by_stroke": [],
+    "derived": {},
+}
+
+
+def test_club_table_names_license_their_own_digits():
+    """Club names carry digits ("MK31", "A6"). The prompt licenses naming a
+    club, so those digits arrive by design -- flagging them as fabricated
+    spends the meet's single rewrite on a false positive, which is what left
+    DM-K/7088 unpublished."""
+    text = ("Svømmeklubben MK31 vandt 5 titler og 11 podieplaceringer. "
+            "A6 JGI-Swim fulgte med 2 titler.")
+    assert check.check_numbers(text, _ENTITY_DIGEST) == set()
+
+
+def test_a_multi_title_swimmers_club_also_licenses_its_digits():
+    assert "31" in check.allowed_numbers(_ENTITY_DIGEST)
+    d = {**_ENTITY_DIGEST, "clubs": [],
+         "multi_title_swimmers": [{"name": "X Y", "club": "MK31", "titles": 3,
+                                   "strokes": ["Fri"], "wins": []}]}
+    assert "31" in check.allowed_numbers(d)
+
+
+def test_a_win_is_bound_to_the_swimmer_who_won_it():
+    """The block's points are the only figures in the report that nothing else
+    protects: they are absent from top_swims by construction."""
+    assert check.points_owners(_ENTITY_DIGEST)["764"] == {"mathias christensen"}
+    good = "Mathias Christensen vandt 200m IM med 764 point."
+    assert check.check_attribution(good, _ENTITY_DIGEST) == set()
+    bad = "Emilie Beckmann vandt fire titler med 764 point."
+    assert check.check_attribution(bad, _ENTITY_DIGEST) == {"Emilie Beckmann: 764"}
+
+
+def test_a_gender_flip_on_a_win_is_caught():
+    """Same defect class as DM-L/9775's "vandt herrernes 50m Ryg" against an F
+    digest row -- every number right, the claim false."""
+    assert check.check_genders("Han vandt herrernes 200m IM.", _ENTITY_DIGEST) == set()
+    assert check.check_genders("Hun vandt damernes 200m IM.",
+                               _ENTITY_DIGEST) == {"damernes 200m IM"}
+
+
+def test_club_aggregates_are_not_treated_as_a_swimmers_result():
+    """A club's title count is nobody's points. If it collides with a real
+    points value the provenance is ambiguous, so the attribution check must
+    stay quiet rather than credit it to the nearest name."""
+    d = {**_ENTITY_DIGEST,
+         "clubs": [{"club": "AGF", "swimmers": 3, "titles": 764, "podiums": 1,
+                    "rank": 1}]}
+    assert "764" not in check.points_owners(d)

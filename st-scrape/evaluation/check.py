@@ -66,6 +66,32 @@ def _walk(obj, out: set[str]) -> None:
                 out.add(m.group(1))
 
 
+def _club_names(digest: dict) -> set[str]:
+    """Every club name the digest carries, from all three blocks that name one.
+
+    Kept in one place because two consumers need the same set: the digit
+    licence in allowed_numbers, and the masking in check_attribution.
+    """
+    out: set[str] = set()
+    for key in ("top_swims", "clubs", "multi_title_swimmers"):
+        for row in digest.get(key) or []:
+            club = row.get("club") if isinstance(row, dict) else None
+            if isinstance(club, str):
+                out.add(club)
+    return out
+
+
+def _named_swimmers(digest: dict) -> set[str]:
+    """Every swimmer the digest names, i.e. every name the prose may use."""
+    out: set[str] = set()
+    for key in ("top_swims", "multi_title_swimmers"):
+        for row in digest.get(key) or []:
+            name = row.get("name") if isinstance(row, dict) else None
+            if isinstance(name, str):
+                out.add(name)
+    return out
+
+
 def allowed_numbers(digest: dict) -> set[str]:
     out: set[str] = set()
     _walk(digest, out)
@@ -84,15 +110,13 @@ def allowed_numbers(digest: dict) -> set[str]:
     if isinstance(name, str):
         out.update(re.findall(r"\d+", name))
     # Club names carry digits — "Svømmeklubben MK31", "A6 JGI-Swim". The prompt
-    # licenses naming a swimmer's club, so those digits arrive in the prose by
-    # design; flagging them as fabricated spends the meet's single rewrite on a
-    # false positive (this is what left DM-K/7088 unpublished). Only top_swims
-    # clubs, and only the digit runs as written — the rest of the digest's free
-    # text stays unlicensed, which is the leak _walk deliberately avoids.
-    for swim in digest.get("top_swims", []):
-        club = swim.get("club") if isinstance(swim, dict) else None
-        if isinstance(club, str):
-            out.update(re.findall(r"\d+", club))
+    # licenses naming a club, so those digits arrive in the prose by design;
+    # flagging them as fabricated spends the meet's single rewrite on a false
+    # positive (this is what left DM-K/7088 unpublished). Only club names, and
+    # only the digit runs as written — the rest of the digest's free text stays
+    # unlicensed, which is the leak _walk deliberately avoids.
+    for club in _club_names(digest):
+        out.update(re.findall(r"\d+", club))
     return out
 
 
@@ -200,7 +224,8 @@ def _aggregate_values(digest: dict) -> set[str]:
              if k != "top_points"}
     for block in (facts, digest.get("derived") or {}):
         _walk(block, out)
-    for block in (digest.get("season_history") or [], digest.get("by_stroke") or []):
+    for block in (digest.get("season_history") or [], digest.get("by_stroke") or [],
+                  digest.get("clubs") or []):
         _walk(block, out)
     return out
 
@@ -219,6 +244,20 @@ def points_owners(digest: dict) -> dict[str, set[str]]:
         if key in ambiguous:
             continue
         out.setdefault(key, set()).add(name.lower())
+    for row in digest.get("multi_title_swimmers") or []:
+        if not isinstance(row, dict):
+            continue
+        name = row.get("name")
+        if not isinstance(name, str):
+            continue
+        for win in row.get("wins") or []:
+            points = win.get("points") if isinstance(win, dict) else None
+            if points is None:
+                continue
+            key = str(points)
+            if key in ambiguous:
+                continue
+            out.setdefault(key, set()).add(name.lower())
     return out
 
 
@@ -238,8 +277,7 @@ def check_attribution(text: str, digest: dict) -> set[str]:
     # Where each digest swimmer is named, case-insensitively: the reports
     # sometimes shout a name ("PAULINE MAHIEU") exactly as the source does.
     mentions: list[tuple[int, str]] = []
-    for name in {s.get("name") for s in digest.get("top_swims", [])
-                 if isinstance(s, dict) and isinstance(s.get("name"), str)}:
+    for name in _named_swimmers(digest):
         for m in re.finditer(re.escape(name), text, re.IGNORECASE):
             mentions.append((m.start(), name.lower()))
     mentions.sort()
@@ -248,8 +286,7 @@ def check_attribution(text: str, digest: dict) -> set[str]:
     # Swim Team Odense vandt ... 834 point" puts a capitalised club between the
     # swimmer and her figure in almost every sentence these reports write.
     masked = text
-    for club in {s.get("club") for s in digest.get("top_swims", [])
-                 if isinstance(s, dict) and isinstance(s.get("club"), str)}:
+    for club in _club_names(digest):
         masked = re.sub(re.escape(club), " " * len(club), masked, flags=re.IGNORECASE)
 
     offenders = set()
@@ -280,12 +317,21 @@ def check_attribution(text: str, digest: dict) -> set[str]:
 
 
 def genders_in_digest(digest: dict) -> dict[tuple[str, str], set[str]]:
-    """(distance, stroke) -> the genders digest.top_swims actually holds."""
-    out: dict[tuple[str, str], set[str]] = {}
-    for swim in digest.get("top_swims", []):
-        if not isinstance(swim, dict):
+    """(distance, stroke) -> the genders the digest actually holds.
+
+    Both name-carrying blocks contribute: a swimmer's title is as much a
+    gendered claim as a top swim, and an event absent here is simply unjudged.
+    """
+    events = [swim.get("event") for swim in digest.get("top_swims", [])
+              if isinstance(swim, dict)]
+    for row in digest.get("multi_title_swimmers") or []:
+        if not isinstance(row, dict):
             continue
-        m = _EVENT.match(str(swim.get("event") or ""))
+        events += [win.get("event") for win in row.get("wins") or []
+                   if isinstance(win, dict)]
+    out: dict[tuple[str, str], set[str]] = {}
+    for event in events:
+        m = _EVENT.match(str(event or ""))
         if m:
             out.setdefault((m.group(2).lower(), m.group(3).lower()),
                            set()).add(m.group(1).upper())
