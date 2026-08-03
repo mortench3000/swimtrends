@@ -133,8 +133,42 @@ def numbers_in_text(text: str) -> set[str]:
     return out
 
 
+_MONTHS = ("januar", "februar", "marts", "april", "maj", "juni", "juli",
+           "august", "september", "oktober", "november", "december")
+
+
+def _date_phrases(digest: dict) -> list[str]:
+    """The meet's own date, in the forms a Danish report writes it.
+
+    meet.date is deliberately absent from allowed_numbers — licensing "10" out
+    of "2026-04-10" as a medal or title count was the leak that guard exists
+    for. But every report opens with the date, so its day number needs a
+    licence *as a date*: masking these phrases keeps "den 12. december 2024"
+    legal while "12 titler" stays fabricated.
+
+    Until this existed the licence was a coincidence — the day passed only when
+    it happened to equal some other digest figure. DM-K/10976 (12-12-2024, no 12
+    anywhere in its digest) therefore failed every attempt on every model, over a
+    date that was right.
+    """
+    raw = (digest.get("meet") or {}).get("date")
+    m = re.fullmatch(r"(\d{1,2})-(\d{1,2})-(\d{4})", raw or "")
+    if not m:
+        return []
+    day, month, year = int(m.group(1)), int(m.group(2)), m.group(3)
+    if not 1 <= month <= 12:
+        return []
+    name = _MONTHS[month - 1]
+    # Longest first: masking "12. december" out of "12. december 2024" would
+    # leave a bare 2024 behind (licensed anyway, but the order is what matters).
+    return [f"{d}. {name} {year}" for d in (day, f"{day:02d}")] \
+        + [f"{d}. {name}" for d in (day, f"{day:02d}")] + [raw]
+
+
 def check_numbers(text: str, digest: dict) -> set[str]:
     """The numeric tokens in `text` that the digest does not license."""
+    for phrase in _date_phrases(digest):
+        text = (text or "").replace(phrase, " ")
     return numbers_in_text(text) - allowed_numbers(digest)
 
 
