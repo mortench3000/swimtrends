@@ -21,6 +21,7 @@ _MEET_COMPARE_SQL = """
            count(DISTINCT swimmer_id) AS entrants,
            count(DISTINCT (gender, distance, stroke, course)) AS events,
            count(DISTINCT club) AS clubs,
+           count(DISTINCT swimmer_id) FILTER (WHERE is_junior) AS juniors,
            CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
            max(points) AS top_points
     FROM results_by_category
@@ -73,6 +74,7 @@ _JUNIOR_MEET_COMPARE_SQL = """
            count(DISTINCT swimmer_id) AS entrants,
            count(DISTINCT (gender, distance, stroke, course)) AS events,
            count(DISTINCT club) AS clubs,
+           count(DISTINCT swimmer_id) AS juniors,
            CAST(quantile_cont(points, 0.5) AS BIGINT) AS median_points,
            max(points) AS top_points
     FROM junior_championship
@@ -174,7 +176,8 @@ def build_meet(con, category: str, meet_id: str) -> dict:
     else:
         facts = dict(zip(fact_cols, con.execute(
             _MEET_FACTS_SQL, [category, meet_id]).fetchone()))
-    comp_cols = ["season", "entrants", "events", "clubs", "median_points", "top_points"]
+    comp_cols = ["season", "entrants", "events", "clubs", "juniors",
+                 "median_points", "top_points"]
     if combined_junior:
         comp = [dict(zip(comp_cols, r)) for r in con.execute(
             _JUNIOR_MEET_COMPARE_SQL, [head[2]]).fetchall()]

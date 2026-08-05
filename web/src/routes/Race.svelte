@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { getRace } from '../lib/dataClient.js'
   import { href } from '../router.js'
-  import { formatInt, formatTime, formatTimeStr } from '../lib/format.js'
+  import { formatInt, formatTime, formatTimeStr, formatShare } from '../lib/format.js'
   import Breadcrumbs from '../components/Breadcrumbs.svelte'
   import StatTile from '../components/StatTile.svelte'
   import TrendChart from '../components/TrendChart.svelte'
@@ -45,7 +45,11 @@
           { label: 'Median', value: formatTime(race.facts.median_cs) },
           ...(race.is_relay || jr ? [] : [
             { label: 'Spredning 1.–8.', value: formatTime(race.facts.spread_1_8_cs) },
-            { label: 'Juniorer', value: formatInt(race.facts.juniors) },
+            {
+              label: 'Juniorer',
+              value: formatInt(race.facts.juniors),
+              share: formatShare(race.facts.juniors, race.facts.contestants),
+            },
           ]),
         ]
       : [],
@@ -83,7 +87,7 @@
 
   <div class="tile-grid">
     {#each tiles as t (t.label)}
-      <StatTile label={t.label} value={t.value} />
+      <StatTile label={t.label} value={t.value} share={t.share} />
     {/each}
   </div>
 

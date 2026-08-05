@@ -14,6 +14,11 @@ export const formatTimeStr = (s) => (s == null ? DASH : s)
 export const formatInt = (n) => (n == null ? DASH : nf.format(n))
 export const formatPoints = (n) => (n == null ? DASH : `${nf.format(n)} p`)
 
+// Share of a total, as whole percent. null when either side is missing, so the
+// caller can just leave it out.
+export const formatShare = (part, total) =>
+  part == null || !total ? null : `${Math.round((part / total) * 100)} %`
+
 export function formatDelta(curr, prev, { lowerIsBetter = false } = {}) {
   if (curr == null || prev == null) return { text: DASH, dir: 'flat' }
   const d = curr - prev

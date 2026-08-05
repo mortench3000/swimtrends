@@ -2,7 +2,7 @@
   import { onMount } from 'svelte'
   import { getMeet, getRaces, getEvaluation } from '../lib/dataClient.js'
   import { href } from '../router.js'
-  import { formatInt, formatPoints, formatTimeStr, formatDelta } from '../lib/format.js'
+  import { formatInt, formatPoints, formatTimeStr, formatDelta, formatShare } from '../lib/format.js'
   import { filterRaces, disciplineOptions, genderOptions } from '../lib/raceFilter.js'
   import { setMeta } from '../lib/meta.js'
   import { meetMeta } from '../lib/seo.js'
@@ -74,7 +74,12 @@
             value: formatInt(meet.facts.clubs),
             delta: formatDelta(meet.facts.clubs, prev?.clubs),
           },
-          ...(jr ? [] : [{ label: 'Juniorer', value: formatInt(meet.facts.juniors) }]),
+          ...(jr ? [] : [{
+            label: 'Juniorer',
+            value: formatInt(meet.facts.juniors),
+            share: formatShare(meet.facts.juniors, meet.facts.entrants),
+            delta: formatDelta(meet.facts.juniors, prev?.juniors),
+          }]),
           {
             label: 'Median point',
             value: formatPoints(meet.facts.median_points),
@@ -107,7 +112,7 @@
 
   <div class="tile-grid">
     {#each tiles as t (t.label)}
-      <StatTile label={t.label} value={t.value} delta={t.delta} />
+      <StatTile label={t.label} value={t.value} share={t.share} delta={t.delta} />
     {/each}
   </div>
 
