@@ -337,7 +337,10 @@
 
   .race-row {
     display: grid;
-    grid-template-columns: 2fr 1.4fr auto auto;
+    /* ponytail: fixed numeric columns — each row is its own grid, so `auto`
+       sized them per-row and the winner column started at a different x on
+       every line. Widen if a race ever shows 3-digit contestant counts. */
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 4.5rem 6rem;
     align-items: center;
     gap: var(--space-3);
     background: var(--surface);
@@ -368,10 +371,20 @@
     font-size: 0.95rem;
   }
 
+  .race-time,
+  .race-count {
+    text-align: right;
+  }
+
   @media (max-width: 32rem) {
     .race-row {
       grid-template-columns: 1fr;
       gap: var(--space-1);
+    }
+
+    .race-time,
+    .race-count {
+      text-align: left;
     }
   }
 </style>
