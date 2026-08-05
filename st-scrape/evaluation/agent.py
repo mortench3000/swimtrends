@@ -247,6 +247,10 @@ _DANISH_FOR = {
     "strokes": "stilarter", "stroke": "stilart",
     "strokearter": "stilarter", "stroketyper": "stilarter",
     "slagarter": "stilarter", "podiums": "podiepladser",
+    # "stroke" translated a word at a time: a slag is a blow, not a swimming
+    # style. Danish spells the plural the same, and all four live occurrences
+    # were plural ("på tværs af slag", "de enkelte slag"), so plural it is.
+    "slag": "stilarter", "slagene": "stilarterne",
     "deltas": "forskelle", "deltaer": "forskelle",
     # A Danish compound the model drops an s from. Same operation, same map.
     "femårsnit": "femårssnit", "femårsnittet": "femårssnittet",
