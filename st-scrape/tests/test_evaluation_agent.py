@@ -786,6 +786,12 @@ def test_plain_prose_swaps_the_english_terms_with_a_fixed_danish_word():
         "8 titler og 13 podiums.": "8 titler og 13 podiepladser.",
         "viser negative deltas i forhold til": "viser negative forskelle i forhold til",
         "På tværs af slagarter og distancer": "På tværs af stilarter og distancer",
+        # Bare "slag" is "stroke" translated a word at a time (a slag is a blow).
+        # Danish spells the plural the same, and every live occurrence was plural
+        # (DO/11710, DM-L/8609, DM-K/8613, DM-K/7088).
+        "På tværs af slag og distancegrupper": "På tværs af stilarter og distancegrupper",
+        "Ser man på de enkelte slag,": "Ser man på de enkelte stilarter,",
+        "Slagene lå under niveauet.": "Stilarterne lå under niveauet.",
     }
     for raw, want in cases.items():
         assert ag.plain_prose(raw) == want
