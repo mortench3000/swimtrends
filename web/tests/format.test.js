@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { formatTime, formatInt, formatPoints, formatDelta } from '../src/lib/format.js'
+import { formatTime, formatInt, formatPoints, formatDelta, formatShare } from '../src/lib/format.js'
 
 test('formatTime handles sub-minute and over-minute and null', () => {
   expect(formatTime(5821)).toBe('58.21')
@@ -12,6 +12,12 @@ test('formatInt uses da-DK grouping', () => {
 })
 test('formatPoints appends unit', () => {
   expect(formatPoints(945)).toBe('945 p')
+})
+test('formatShare rounds to whole percent and skips a missing total', () => {
+  expect(formatShare(162, 447)).toBe('36 %')
+  expect(formatShare(5, 28)).toBe('18 %')
+  expect(formatShare(null, 447)).toBeNull()
+  expect(formatShare(162, 0)).toBeNull()
 })
 test('formatDelta direction respects lowerIsBetter', () => {
   expect(formatDelta(100, 120, { lowerIsBetter: true }).dir).toBe('good') // faster/smaller

@@ -67,6 +67,8 @@ def test_build_meet_facts_and_comparison():
     comp_seasons = [c["season"] for c in out["season_comparison"]]
     assert comp_seasons == [2026, 2025]        # <=5, newest first
     assert all(c["elite_median_points"] == 500 for c in out["season_comparison"])
+    # juniors per season, so the meet page can show a delta on the junior count
+    assert all("juniors" in c for c in out["season_comparison"])
 
 
 def test_build_races_lists_events_with_winner():

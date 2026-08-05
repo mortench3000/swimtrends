@@ -39,6 +39,16 @@ test('ordinary meet still shows the Juniorer tile', async () => {
   expect(screen.getByText('Juniorer')).toBeInTheDocument()
 })
 
+test('Meet shows the junior share of entrants and its season delta', async () => {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  const tile = (await screen.findByText('Juniorer')).parentElement
+  expect(tile.textContent).toContain('19 %')   // 85 of 450 entrants
+  expect(tile.textContent).toContain('+5')     // 85 vs 80 last season
+})
+
 test('Meet renders facts and a race link', async () => {
   vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
   vi.spyOn(dc, 'getRaces').mockResolvedValue(racesJson)
@@ -192,6 +202,13 @@ test('junior-scoped race hides senior-structure tiles', async () => {
   expect(screen.queryByText('Juniorer')).toBeNull()
   expect(screen.getByText('Deltagere')).toBeInTheDocument()   // kept
   expect(screen.queryByText(/A-finale-grænse pr\. sæson/)).toBeNull()   // cutline chart hidden
+})
+
+test('Race shows the junior share of contestants', async () => {
+  vi.spyOn(dc, 'getRace').mockResolvedValue(raceJson)
+  render(Race, { params: { cat: 'DM-L', meetId: 'M2026', raceKey: 'M-100-Fri-LCM' } })
+  const tile = (await screen.findByText('Juniorer')).parentElement
+  expect(tile.textContent).toContain('18 %')   // 5 of 28 contestants
 })
 
 test('non-junior race still shows the A-finale-grænse tile', async () => {
