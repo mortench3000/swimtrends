@@ -18,6 +18,9 @@
 //
 // ES5 only: the CloudFront Functions runtime is not a full modern JS engine.
 var APEX = 'swimtrends.dk';
+// Same value as the distribution's response-headers policy (web stack). The
+// www 301 below is generated here, so it has to carry HSTS itself.
+var HSTS = 'max-age=31536000; includeSubDomains';
 
 function handler(event) {
   var request = event.request;
@@ -32,7 +35,10 @@ function handler(event) {
     return {
       statusCode: 301,
       statusDescription: 'Moved Permanently',
-      headers: { location: { value: 'https://' + APEX + request.uri + (qs ? '?' + qs : '') } },
+      headers: {
+        location: { value: 'https://' + APEX + request.uri + (qs ? '?' + qs : '') },
+        'strict-transport-security': { value: HSTS },
+      },
     };
   }
 
