@@ -28,7 +28,7 @@ Different commands need different wiring (all use AWS creds for the region):
 | --- | --- |
 | `register`, `pending` | `REGISTRY_TABLE` (DynamoDB, direct) |
 | `dispatch` | `REGISTRY_TABLE`, `DISPATCHER_FUNCTION` (Lambda) |
-| `curate` | `CURATOR_FUNCTION` (Lambda) |
+| `curate` | `CURATOR_FUNCTION` = the `SwimtrendsCuratedStack-CurateTrigger…` Lambda (plus `REGISTRY_TABLE`, `DISPATCHER_FUNCTION`, which every operational command reads at startup) |
 | `class` | `OVERRIDES_TABLE` (DynamoDB) |
 
 ## Commands
