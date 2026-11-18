@@ -23,14 +23,16 @@ function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value;
 
-  // ponytail: the query string is dropped. Known gap: meet pages now carry
-  // ?discipline=&gender= filters, so a shared www link loses its filters (and
-  // inbound utm_* tags). Rebuild it from request.querystring in a follow-up.
+  // Keep the query: meet pages carry their filters in it (?discipline=&gender=),
+  // and inbound utm_* tags should survive too. rawQueryString() (runtime 2.0)
+  // is the query exactly as sent, so it is copied verbatim: no decoding, no
+  // re-encoding, nothing reinterpreted ('+', '%20', a stray '%').
   if (host && host !== APEX) {
+    var qs = request.rawQueryString();
     return {
       statusCode: 301,
       statusDescription: 'Moved Permanently',
-      headers: { location: { value: 'https://' + APEX + request.uri } },
+      headers: { location: { value: 'https://' + APEX + request.uri + (qs ? '?' + qs : '') } },
     };
   }
 
