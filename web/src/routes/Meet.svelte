@@ -55,7 +55,8 @@
       const f = { discipline, gender }
       if (!disciplineOptions(races).includes(f.discipline)) f.discipline = 'all'
       if (!genderOptions(races).includes(f.gender)) f.gender = 'all'
-      if (f.discipline !== discipline || f.gender !== gender) setFilters(f)
+      if ((f.discipline !== discipline || f.gender !== gender) &&
+          location.pathname === href('meet', { cat: params.cat, meetId: params.meetId })) setFilters(f)
       evaluation = e
       setMeta(meetMeta(meet, evaluation))
     } catch (e) {

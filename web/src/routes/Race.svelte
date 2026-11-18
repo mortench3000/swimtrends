@@ -70,7 +70,7 @@
   ])
 </script>
 
-<a class="back" href={href('meet', { cat: params.cat, meetId: params.meetId })} onclick={back}>← Tilbage</a>
+<a class="back" href={href('meet', { cat: params.cat, meetId: params.meetId })} onclick={back}><span aria-hidden="true">←</span> Tilbage</a>
 
 {#if loading}
   <Breadcrumbs

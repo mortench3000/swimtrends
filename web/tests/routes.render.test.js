@@ -10,7 +10,10 @@ import raceJson from './fixtures/race.json'
 import evaluationJson from './fixtures/evaluation.json'
 
 beforeEach(() => { dc._resetCache() })
-afterEach(() => history.replaceState(null, '', '/'))
+afterEach(() => {
+  vi.restoreAllMocks()
+  history.replaceState(null, '', '/')
+})
 
 const juniorMeet = {
   category: 'DMJ-L', meet_id: 'C2026', meet_name: 'Combined Champs 2026',
@@ -258,14 +261,28 @@ test('a filter the meet does not offer falls back to Alle', async () => {
   render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
   await screen.findByRole('button', { name: 'Fri' })
   expect(alle('Disciplin')).toHaveAttribute('aria-pressed', 'true')
-  expect(screen.getAllByRole('listitem').length).toBeGreaterThanOrEqual(racesJson.races.length)
+  expect(screen.getAllByRole('link').filter(a => a.classList.contains('race-row'))).toHaveLength(2)
   expect(location.search).toBe('')
+})
+
+test('a late fallback does not rewrite the URL of a page the user already left', async () => {
+  history.replaceState({}, '', '/DM-L/M2026?discipline=Stafet&gender=M')
+  let resolve
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockReturnValue(new Promise(r => { resolve = r }))
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  history.replaceState(null, '', '/DM-L')
+  resolve(racesJson)
+  await screen.findByRole('button', { name: 'Fri' })
+  expect(location.search).toBe('')
+  expect(location.pathname).toBe('/DM-L')
 })
 
 function mountRace() {
   vi.spyOn(dc, 'getRace').mockResolvedValue(raceJson)
   render(Race, { params: { cat: 'DM-L', meetId: 'M2026', raceKey: 'M-100-Fri-LCM' } })
-  return screen.getByRole('link', { name: '← Tilbage' })
+  return screen.getByRole('link', { name: 'Tilbage' })
 }
 
 test('Tilbage links to the meet', () => {
@@ -278,7 +295,6 @@ test('Tilbage goes back after in-app navigation', async () => {
   const link = mountRace()
   expect(await fireEvent.click(link)).toBe(false)
   expect(back).toHaveBeenCalledTimes(1)
-  back.mockRestore()
 })
 
 test('Tilbage follows its link on a direct landing', () => {
@@ -287,14 +303,18 @@ test('Tilbage follows its link on a direct landing', () => {
   const link = mountRace()
   fireEvent.click(link)
   expect(back).not.toHaveBeenCalled()
-  back.mockRestore()
+  expect(location.pathname).toBe('/DM-L/M2026')
 })
 
 test('Tilbage leaves modified clicks to the browser', async () => {
   const back = vi.spyOn(history, 'back').mockImplementation(() => {})
   history.replaceState({ app: true }, '', '/DM-L/M2026/x')
   const link = mountRace()
-  expect(await fireEvent.click(link, { ctrlKey: true })).toBe(true)
+  let prevented
+  const probe = (e) => { prevented = e.defaultPrevented; e.preventDefault() }
+  window.addEventListener('click', probe)
+  await fireEvent.click(link, { ctrlKey: true })
+  window.removeEventListener('click', probe)
+  expect(prevented).toBe(false)
   expect(back).not.toHaveBeenCalled()
-  back.mockRestore()
 })
