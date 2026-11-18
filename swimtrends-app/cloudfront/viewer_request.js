@@ -19,18 +19,43 @@
 // ES5 only: the CloudFront Functions runtime is not a full modern JS engine.
 var APEX = 'swimtrends.dk';
 
+// Decode-then-encode, so the result is encoded exactly once whether CloudFront
+// handed the value over encoded or not. A malformed escape ("100%") makes
+// decodeURIComponent throw; pass such a value through as-is.
+function enc(s) {
+  try {
+    return encodeURIComponent(decodeURIComponent(s));
+  } catch (e) {
+    return s;
+  }
+}
+
+// request.querystring is an object: { name: { value, multiValue?: [{ value }] } }.
+// A repeated parameter arrives once, with all of its values in multiValue.
+function queryString(qs) {
+  var parts = [];
+  for (var name in qs) {
+    var values = qs[name].multiValue || [qs[name]];
+    for (var i = 0; i < values.length; i++) {
+      parts.push(enc(name) + '=' + enc(values[i].value));
+    }
+  }
+  return parts.length ? '?' + parts.join('&') : '';
+}
+
 function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value;
 
-  // ponytail: the query string is dropped. Known gap: meet pages now carry
-  // ?discipline=&gender= filters, so a shared www link loses its filters (and
-  // inbound utm_* tags). Rebuild it from request.querystring in a follow-up.
+  // Keep the query: meet pages carry their filters in it (?discipline=&gender=),
+  // and inbound utm_* tags should survive too.
   if (host && host !== APEX) {
     return {
       statusCode: 301,
       statusDescription: 'Moved Permanently',
-      headers: { location: { value: 'https://' + APEX + request.uri } },
+      headers: {
+        location: { value: 'https://' + APEX + request.uri + queryString(request.querystring || {}) },
+      },
     };
   }
 

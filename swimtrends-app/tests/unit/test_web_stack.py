@@ -66,9 +66,11 @@ def test_viewer_function_is_associated_with_the_default_behavior():
 FUNC_JS = pathlib.Path(__file__).resolve().parents[2] / "cloudfront" / "viewer_request.js"
 
 
-def _call(uri: str, host: str = "swimtrends.dk") -> dict:
+def _call(uri: str, host: str = "swimtrends.dk", querystring: dict | None = None) -> dict:
     """Run the real function body and return its result (a request or a response)."""
     event = {"request": {"uri": uri, "headers": {"host": {"value": host}}}}
+    if querystring is not None:
+        event["request"]["querystring"] = querystring
     script = FUNC_JS.read_text() + (
         f"\nprocess.stdout.write(JSON.stringify(handler({json.dumps(event)})))")
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
@@ -108,6 +110,36 @@ def test_www_redirects_to_the_apex(uri):
     assert res["headers"]["location"]["value"] == f"https://swimtrends.dk{uri}"
     # A redirect is a response, not a rewritten request.
     assert "uri" not in res
+
+
+# The redirect must keep the query: meet pages carry their filters in it
+# (?discipline=&gender=), and shared www links would otherwise lose them.
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize("querystring,expected", [
+    ({"discipline": {"value": "IM"}, "gender": {"value": "M"}}, "?discipline=IM&gender=M"),
+    # A repeated parameter arrives once, with every value in multiValue.
+    ({"a": {"value": "1", "multiValue": [{"value": "1"}, {"value": "2"}]}}, "?a=1&a=2"),
+    # Encoded or not on the way in, the Location is encoded exactly once.
+    ({"utm_campaign": {"value": "jul%20tilbud"}}, "?utm_campaign=jul%20tilbud"),
+    ({"utm_campaign": {"value": "jul tilbud"}}, "?utm_campaign=jul%20tilbud"),
+    ({"q": {"value": "æøå"}}, "?q=%C3%A6%C3%B8%C3%A5"),
+    # A malformed escape passes through rather than throwing.
+    ({"x": {"value": "100%"}}, "?x=100%"),
+    ({"flag": {"value": ""}}, "?flag="),
+    ({}, ""),
+])
+def test_www_redirect_keeps_the_query(querystring, expected):
+    res = _call("/DM-L/10334", host="www.swimtrends.dk", querystring=querystring)
+    assert res["statusCode"] == 301
+    assert res["headers"]["location"]["value"] == f"https://swimtrends.dk/DM-L/10334{expected}"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_apex_request_with_a_query_is_only_rewritten():
+    qs = {"discipline": {"value": "IM"}}
+    res = _call("/DM-L/10334", querystring=qs)
+    assert res["uri"] == "/DM-L/10334/index.html"
+    assert res["querystring"] == qs
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")

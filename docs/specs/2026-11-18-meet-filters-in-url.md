@@ -63,9 +63,9 @@ replaces it. Back should land on the meet page exactly as it was left.
 - `prerender.mjs` static shells and `sitemap.xml` (keyed by path).
 - Canonical URL: `lib/meta.js` builds it from `location.pathname`, so filtered
   URLs canonicalise to the bare meet path.
-- CloudFront `viewer_request.js`: the path rewrite is unaffected, but the
-  www->apex 301 drops the query string, so a shared www link loses its filters.
-  Known gap, follow-up.
+- CloudFront `viewer_request.js`: the path rewrite is unaffected. The www->apex
+  301 used to drop the query string; fixed in
+  `2026-11-18-www-redirect-keeps-query.md`.
 
 ## Tests
 - `tests/raceFilter.test.js`: helper round-trip, unknown values, `all` omitted.
