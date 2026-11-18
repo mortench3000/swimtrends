@@ -49,3 +49,36 @@ def test_run_writes_all_five_tables_and_notifies():
         written["curated/fact_result/season=2021/course=LCM/meet=8609.parquet"]))
     assert fr.to_pylist()[0]["points"] == 1000
     assert any("curat" in s.lower() for s in notes)
+
+
+def _run_with_base_times(base_times_text):
+    raw = {
+        "raw/meet=8609/meet_info.jsonl": MEET,
+        "raw/meet=8609/races.jsonl": RACES,
+        "raw/meet=8609/results.jsonl": RESULTS,
+        "reference/point_base_times.jsonl": base_times_text,
+    }
+    notes = []
+    run.run_curate_task(
+        meet_id="8609",
+        read_text=lambda key: raw[key],
+        get_overrides=lambda mid: {},
+        write_bytes=lambda key, data: None,
+        notify=lambda subject, msg: notes.append((subject, msg)),
+    )
+    return notes
+
+
+def test_missing_base_times_for_season_warns_instead_of_succeeded():
+    # Only season 2020 is in the table; the meet is season 2021 LCM, so every
+    # result would silently get points = NULL behind a "SUCCEEDED" email.
+    notes = _run_with_base_times(BASE_TIMES.replace('"season": 2021', '"season": 2020'))
+    [(subject, msg)] = notes
+    assert "WARNING" in subject and "base times" in subject
+    assert "SUCCEEDED" not in subject
+    assert "2021" in msg and "LCM" in msg
+
+
+def test_base_times_present_keeps_succeeded():
+    [(subject, _)] = _run_with_base_times(BASE_TIMES)
+    assert "SUCCEEDED" in subject
