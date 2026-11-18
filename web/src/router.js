@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store'
 
 export function parsePath(path) {
-  const parts = (path || '').split('/').filter(Boolean)
+  const parts = (path || '').split('?')[0].split('/').filter(Boolean)
   // CloudFront rewrites /DM-L/12486 to the .../index.html object key, so the
   // browser never shows that suffix — but anyone who types it should still get
   // the meet page, not a race lookup for a raceKey of "index.html".
@@ -36,7 +36,7 @@ export const route = writable(parsePath(
   typeof location !== 'undefined' ? location.pathname : ''))
 
 export function navigate(path) {
-  history.pushState({}, '', path)
+  history.pushState({ app: true }, '', path)
   route.set(parsePath(path))
 }
 
@@ -56,6 +56,6 @@ if (typeof window !== 'undefined') {
     if (!a || !a.href || a.origin !== location.origin) return
     if (a.target || a.hasAttribute('download')) return
     e.preventDefault()
-    navigate(a.pathname)
+    navigate(a.pathname + a.search)
   })
 }
