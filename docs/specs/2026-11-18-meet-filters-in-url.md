@@ -8,6 +8,8 @@ replaces it. Back should land on the meet page exactly as it was left.
 
 ## Goals / non-goals / anti-goals
 - **Goals:** Back, reload, and a shared link all reproduce the filtered meet page.
+- **Also (added):** a "← Tilbage" link on the race page that returns to the
+  page the user came from, so a click lands on the filtered meet.
 - **Non-goals:** the race page's "Stævne" breadcrumb stays a plain link to the
   unfiltered meet (user's call). Race URLs are unchanged. No filters on other pages.
 - **Anti-goals:** every chip click becoming its own Back step; filtered URLs
@@ -43,8 +45,21 @@ replaces it. Back should land on the meet page exactly as it was left.
   - `popstate` is unchanged: Back remounts the meet page, which reads the
     filters from the restored URL.
 
+- **Router marks its own history entries:** `navigate()` pushes
+  `{ app: true }` as the history state, so a page can tell whether its Back
+  step stays inside the SPA.
+- **`web/src/routes/Race.svelte`: "← Tilbage" link** on its own line above the
+  breadcrumbs, in the loading, error and loaded states (our call).
+  - `href` is the bare meet URL, so it is a real link (middle-click, new tab,
+    keyboard all work).
+  - On a plain left click, if `history.state?.app` is true, it calls
+    `history.back()` (and prevents the default), landing on the filtered meet.
+  - Otherwise (shared link, new tab, search result) it follows the href to the
+    meet, unfiltered (our call: Tilbage never leaves the site).
+  - Modified clicks (Ctrl/Cmd/Shift/Alt, non-left button) are left to the browser.
+
 ## Unchanged (checked)
-- Race page, its breadcrumb, home/category pages.
+- Race page breadcrumb, home/category pages.
 - `prerender.mjs` static shells and `sitemap.xml` (keyed by path).
 - Canonical URL: `lib/meta.js` builds it from `location.pathname`, so filtered
   URLs canonicalise to the bare meet path.
@@ -53,6 +68,10 @@ replaces it. Back should land on the meet page exactly as it was left.
 
 ## Tests
 - `tests/raceFilter.test.js`: helper round-trip, unknown values, `all` omitted.
-- `tests/router.test.js`: query kept on navigation, route parsed from the path.
+- `tests/router.test.js`: query kept on navigation, route parsed from the path,
+  `navigate()` marks its history entries.
+- `tests/routes.render.test.js`: Tilbage goes back after in-app navigation,
+  follows its href on a direct landing, leaves modified clicks alone.
 - Real-browser check (`/run-web`): filter, open race, Back → filters restored;
-  reload keeps them; chip clicks add no Back steps.
+  reload keeps them; chip clicks add no Back steps; "Tilbage" returns to the
+  filtered meet.
