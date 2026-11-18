@@ -53,3 +53,66 @@ def test_curate_fails_loudly_when_meet_not_launched():
     with pytest.raises(SystemExit, match="8609"):
         cli.run(["curate", "8609"], registry=None, invoke=None,
                 curate=lambda payload: {"launched": []}, overrides=None)
+
+
+# --- curate --season/--course/--unscored: pick meets from the curated zone ---
+
+def _curated_con():
+    import duckdb
+    from tests.analytics_fixtures import build_curated
+    con = duckdb.connect()
+    row = dict(rank=1, relay_count=1, distance=100, stroke="Fly", gender="M")
+    build_curated(con, obt=[
+        dict(row, result_id="a", meet_id="m1", season=2023, course="SCM", points=900),
+        dict(row, result_id="b", meet_id="m2", season=2023, course="SCM", points=None),
+        dict(row, result_id="c", meet_id="m3", season=2023, course="LCM", points=None),
+        dict(row, result_id="d", meet_id="m4", season=2027, course="SCM", points=None),
+    ])
+    return con
+
+
+def _curate(argv):
+    invoked = []
+    cli.run(["curate", *argv], registry=None, invoke=None,
+            curate=lambda p: invoked.append(p) or {"launched": p.get("meet_ids", [])},
+            overrides=None, connect=_curated_con)
+    return invoked
+
+
+def test_curate_season_and_course_selects_those_meets():
+    assert _curate(["--season", "2023", "--course", "SCM"]) == [{"meet_ids": ["m1", "m2"]}]
+
+
+def test_curate_unscored_selects_meets_without_points():
+    assert _curate(["--unscored"]) == [{"meet_ids": ["m2", "m3", "m4"]}]
+    assert _curate(["--unscored", "--season", "2023", "--course", "SCM"]) == [
+        {"meet_ids": ["m2"]}]
+
+
+def test_curate_filter_matching_nothing_launches_nothing(capsys):
+    assert _curate(["--season", "1999"]) == []
+    assert "No meets match" in capsys.readouterr().out
+
+
+def test_curate_meet_id_and_filters_are_exclusive():
+    import pytest
+    with pytest.raises(SystemExit):
+        _curate(["8609", "--season", "2023"])
+
+
+# --- Lambda names come from CloudFormation when not exported ---
+
+class FakeCfn:
+    def describe_stack_resources(self, StackName):
+        assert StackName == "SwimtrendsCuratedStack"
+        return {"StackResources": [
+            {"LogicalResourceId": "CurateTaskDef281B5269", "ResourceType": "AWS::ECS::TaskDefinition",
+             "PhysicalResourceId": "td"},
+            {"LogicalResourceId": "CurateTriggerE7F8C299", "ResourceType": "AWS::Lambda::Function",
+             "PhysicalResourceId": "SwimtrendsCuratedStack-CurateTrigger-abc"},
+        ]}
+
+
+def test_stack_function_finds_lambda_by_logical_prefix():
+    assert cli.stack_function(FakeCfn(), "SwimtrendsCuratedStack", "CurateTrigger") == \
+        "SwimtrendsCuratedStack-CurateTrigger-abc"

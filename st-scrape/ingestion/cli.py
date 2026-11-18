@@ -53,6 +53,13 @@ def build_parser():
     cur.add_argument("meet_id", nargs="?", default=None)
     cur.add_argument("--all", action="store_true",
                      help="Curate every meet (full rebuild).")
+    cur.add_argument("--season", type=int, default=None,
+                     help="Curate the curated zone's meets of this season.")
+    cur.add_argument("--course", choices=["SCM", "LCM"], default=None,
+                     help="Curate the curated zone's meets of this course.")
+    cur.add_argument("--unscored", action="store_true",
+                     help="Only meets with no points at all (e.g. curated before "
+                          "their season's WA base times existed).")
 
     cls = sub.add_parser("class", help="Manage authoritative class overrides.")
     cls_sub = cls.add_subparsers(dest="class_command", required=True)
@@ -119,6 +126,25 @@ def _raw_meet_ids():
                   if o["Key"].endswith("/results.jsonl"))
 
 
+def select_meets(con, *, season=None, course=None, unscored=False):
+    """Curated meet ids matching the filters, sorted."""
+    rows = con.execute(
+        "SELECT meet_id FROM cur_obt "
+        "WHERE (? IS NULL OR season = ?) AND (? IS NULL OR course = ?) "
+        "GROUP BY meet_id HAVING NOT ? OR count(points) = 0 ORDER BY meet_id",
+        [season, season, course, course, unscored]).fetchall()
+    return [r[0] for r in rows]
+
+
+def stack_function(cfn, stack, logical_prefix):
+    """Physical name of the Lambda whose CDK logical id starts with logical_prefix."""
+    for r in cfn.describe_stack_resources(StackName=stack)["StackResources"]:
+        if (r["ResourceType"] == "AWS::Lambda::Function"
+                and r["LogicalResourceId"].startswith(logical_prefix)):
+            return r["PhysicalResourceId"]
+    raise SystemExit(f"No {logical_prefix}* Lambda in stack {stack}.")
+
+
 def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
     """Execute one CLI command. registry/invoke/curate/overrides injected."""
     args = build_parser().parse_args(argv)
@@ -164,11 +190,19 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
         return
 
     if args.command == "curate":
-        if args.all and args.meet_id:
-            raise SystemExit("Pass a meet_id OR --all, not both.")
-        if not args.all and not args.meet_id:
-            raise SystemExit("curate needs a meet_id or --all.")
-        payload = {"all": True} if args.all else {"meet_ids": [args.meet_id]}
+        filtered = args.season is not None or args.course or args.unscored
+        if sum(map(bool, (args.meet_id, args.all, filtered))) != 1:
+            raise SystemExit("curate needs exactly one of: a meet_id, --all, "
+                             "or --season/--course/--unscored.")
+        if filtered:
+            ids = select_meets((connect or _default_query_connect)(), season=args.season,
+                               course=args.course, unscored=args.unscored)
+            if not ids:
+                print("No meets match.")
+                return
+            payload = {"meet_ids": ids}
+        else:
+            payload = {"all": True} if args.all else {"meet_ids": [args.meet_id]}
         result = curate(payload) or {}
         launched = result.get("launched", [])
         print(f"Curate launched: {', '.join(launched) or '(none)'}")
@@ -294,13 +328,18 @@ def main():
 
     from ingestion.registry import MeetRegistry
 
-    registry = MeetRegistry(os.environ["REGISTRY_TABLE"])
+    # Fixed CDK names; Lambda names have random suffixes, so look them up on
+    # first use. Exported env vars still win.
+    registry = MeetRegistry(os.environ.get("REGISTRY_TABLE", "swimtrends-meet-registry"))
     lambda_client = boto3.client("lambda")
-    function_name = os.environ["DISPATCHER_FUNCTION"]
+
+    def function(env, stack, logical_prefix):
+        return os.environ.get(env) or stack_function(
+            boto3.client("cloudformation"), stack, logical_prefix)
 
     def invoke(payload):
         resp = lambda_client.invoke(
-            FunctionName=function_name,
+            FunctionName=function("DISPATCHER_FUNCTION", "SwimtrendsIngestionStack", "Dispatcher"),
             InvocationType="RequestResponse",  # synchronous: report the result to the operator
             Payload=json.dumps(payload).encode("utf-8"),
         )
@@ -309,13 +348,10 @@ def main():
 
     from curate.overrides import ClassOverrides
 
-    overrides = ClassOverrides(os.environ["OVERRIDES_TABLE"]) \
-        if os.environ.get("OVERRIDES_TABLE") else None
-    curator_fn = os.environ.get("CURATOR_FUNCTION")
+    overrides = ClassOverrides(os.environ.get("OVERRIDES_TABLE", "swimtrends-class-overrides"))
 
     def curate(payload):
-        if curator_fn is None:
-            raise SystemExit("CURATOR_FUNCTION not set.")
+        curator_fn = function("CURATOR_FUNCTION", "SwimtrendsCuratedStack", "CurateTrigger")
         meet_ids = payload.get("meet_ids") or _raw_meet_ids()
         launched = []
         # ponytail: batches of 10 keep each RunTask loop well inside the

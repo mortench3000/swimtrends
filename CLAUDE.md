@@ -85,7 +85,7 @@ cd st-scrape && .venv/bin/python scrape_races.py 12486 DM-L DMJ-L
 # Regenerate the points base-times table (reads legacy CSV + wa-points/*.md)
 cd st-scrape && .venv/bin/python gen_base_times.py   # -> db/point_base_times.jsonl
 
-# CLI — operational (need REGISTRY_TABLE etc.; see docs/ingestion.md)
+# CLI — operational (AWS creds only; names are resolved — see docs/ingestion.md)
 cd st-scrape && .venv/bin/python -m ingestion.cli register|dispatch|curate|class|pending …
 
 # CLI — read-only analytics (need only AWS creds for S3)

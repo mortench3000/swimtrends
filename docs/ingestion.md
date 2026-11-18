@@ -22,14 +22,12 @@ A scraped meet's `results.jsonl` landing in S3 triggers curation automatically
 dispatcher will (re)pick up — that's what `pending` lists.
 
 ## Environment
-Different commands need different wiring (all use AWS creds for the region):
-
-| Command | Needs |
-| --- | --- |
-| `register`, `pending` | `REGISTRY_TABLE` (DynamoDB, direct) |
-| `dispatch` | `REGISTRY_TABLE`, `DISPATCHER_FUNCTION` (Lambda) |
-| `curate` | `CURATOR_FUNCTION` = the `SwimtrendsCuratedStack-CurateTrigger…` Lambda (plus `REGISTRY_TABLE`, `DISPATCHER_FUNCTION`, which every operational command reads at startup) |
-| `class` | `OVERRIDES_TABLE` (DynamoDB) |
+Only AWS creds are needed (`AWS_PROFILE=swimtrends`). Table names default to
+their fixed CDK names (`swimtrends-meet-registry`, `swimtrends-class-overrides`),
+and the dispatcher / curate-trigger Lambda names are looked up from the
+`SwimtrendsIngestionStack` / `SwimtrendsCuratedStack` CloudFormation stacks on
+first use. Exporting `REGISTRY_TABLE`, `OVERRIDES_TABLE`, `DISPATCHER_FUNCTION`
+or `CURATOR_FUNCTION` overrides the default.
 
 ## Commands
 
@@ -68,6 +66,8 @@ explicitly (no accidental mass-scrape).
 ```bash
 swimtrends curate 12486   # one meet
 swimtrends curate --all   # full rebuild of the curated zone
+swimtrends curate --season 2023 --course SCM   # every curated meet of that season/course
+swimtrends curate --unscored [--season S]      # meets with no points at all
 ```
 Normally curation is automatic on scrape; use this to re-curate after a code or
 base-times change.
@@ -132,7 +132,9 @@ unchanged.
    aws s3 cp s3://swimtrends-meet-data/reference/point_base_times.jsonl - | diff - db/point_base_times.jsonl
    ```
    Expect only added rows for the new season: **48 for SCM, 42 for LCM**,
-   none removed. Check them against the markdown, not by eye.
+   none removed (a correction shows as changed rows instead). Then `pytest -q tests/test_base_times_source.py`, which checks
+   every `BLOCKS` row against the `wa-points/*.md` documents. If it flags a
+   row, check the PDF: the markdown conversion has typos.
 4. **PR.** `pytest -q`, branch, PR, green CI, squash-merge.
 5. **Upload** (the bucket is versioned):
    ```bash
@@ -141,9 +143,9 @@ unchanged.
    Every curate from here on scores the new season.
 6. **Re-curate** meets curated before the upload:
    ```bash
-   swimtrends query --sql "select meet_id, count(points) pts from cur_obt
-                           where season=<S> and course='<C>' group by 1"
-   swimtrends curate <meet_id>        # each meet with pts = 0
+   swimtrends curate --unscored --season <S> --course <C>
    ```
+   When *correcting* an existing edition, drop `--unscored`: those meets are
+   scored, just wrongly.
 7. **Publish.** `make web-refresh` (~50 min). AI reports for those meets are
    regenerated in the same run, since their digest changed.
