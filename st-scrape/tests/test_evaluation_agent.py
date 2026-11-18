@@ -813,3 +813,31 @@ def test_plain_prose_covers_the_whole_counted_swimmers_and_podium_families():
     # "tæller" as a verb is untouched: it is always followed by a count, never
     # by "svømmere" directly.
     assert ag.plain_prose("Stævnet tæller 265 juniorer.") == "Stævnet tæller 265 juniorer."
+
+
+def test_plain_prose_uses_the_swimming_words_for_events_courses_and_deltas():
+    """Live in the published reports (2026-11-18): "44 øvelser i kortbane"
+    (gymnastics/school word, wrong preposition), "en delta på -23 point" and
+    "et delta på 7 point" (jargon, and the article must follow the swap), "8
+    podier" (not Danish swimming), and "10 podieplacering" (singular after a
+    count). Each has exactly one right form, so they are repaired, not gated."""
+    cases = {
+        "afviklet over 44 øvelser i kortbane.": "afviklet over 44 discipliner på kortbane.",
+        "Øvelserne i langbane lå lavt.": "Disciplinerne på langbane lå lavt.",
+        "I kortbane faldt niveauet.": "På kortbane faldt niveauet.",
+        "median med en delta på -23 point,": "median med en forskel på -23 point,",
+        "bevægelse med et delta på 7 point": "bevægelse med en forskel på 7 point",
+        "med en positiv delta sammenlignet": "med en positiv forskel sammenlignet",
+        "negative delta-værdier i forhold til": "negative forskelle i forhold til",
+        "er delta-værdien ikke": "er forskellen ikke",
+        "af delta-værdierne i": "af forskellene i",
+        "5 titler, 8 podier og 12 svømmere.": "5 titler, 8 podiepladser og 12 svømmere.",
+        "8 titler, 10 podieplacering og 16 svømmere.":
+            "8 titler, 10 podieplaceringer og 16 svømmere.",
+    }
+    for raw, want in cases.items():
+        assert ag.plain_prose(raw) == want, raw
+    # Correct Danish is left alone: a compound on the course, a real singular.
+    for good in ("en tid i kortbanebassinet", "1 podieplacering", "på kortbane",
+                 "discipliner i kortbane-meter"):
+        assert ag.plain_prose(good) == good

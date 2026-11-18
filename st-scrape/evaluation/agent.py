@@ -252,12 +252,31 @@ _DANISH_FOR = {
     # were plural ("på tværs af slag", "de enkelte slag"), so plural it is.
     "slag": "stilarter", "slagene": "stilarterne",
     "deltas": "forskelle", "deltaer": "forskelle",
+    # Not English, but the same one-word repair: "øvelser" is gymnastics/school
+    # Danish, "podier" isn't Danish swimming (DMJ-K/12489 had both).
+    "øvelse": "disciplin", "øvelsen": "disciplinen",
+    "øvelser": "discipliner", "øvelserne": "disciplinerne",
+    "podier": "podiepladser",
     # A Danish compound the model drops an s from. Same operation, same map.
     "femårsnit": "femårssnit", "femårsnittet": "femårssnittet",
 }
 _ENGLISH = re.compile(
     r"\b(" + "|".join(sorted(_DANISH_FOR, key=len, reverse=True)) + r")\b",
     re.IGNORECASE)
+# Phrase-level repairs, each with one right form: the article must follow
+# "delta" -> "forskel" ("et delta" was live too); a course is swum *på*, not
+# *i* ("i kortbanebassinet" is correct and the trailing \b spares it); and a
+# count above 1 takes the plural ("10 podieplacering").
+_PHRASES = [
+    (re.compile(r"\b(?:en|et)\s+delta\b(?!-)"), "en forskel"),
+    (re.compile(r"\b(?:En|Et)\s+delta\b(?!-)"), "En forskel"),
+    (re.compile(r"\bdelta\b(?!-)"), "forskel"),
+    (re.compile(r"\bdelta-værdi(en|er|erne)?\b"),
+     lambda m: "forskel" + {None: "", "en": "len", "er": "le", "erne": "lene"}[m[1]]),
+    (re.compile(r"\bi\s+(kort|lang)bane\b(?!-)"), r"på \1bane"),
+    (re.compile(r"\bI\s+(kort|lang)bane\b(?!-)"), r"På \1bane"),
+    (re.compile(r"\b(?!1\b)(\d+)\s+podieplacering\b"), r"\1 podieplaceringer"),
+]
 
 
 def plain_prose(text: str) -> str:
@@ -277,6 +296,8 @@ def plain_prose(text: str) -> str:
         return f"{word} "
     out = _COUNTED.sub(r"\1", _COURSE.sub("", _MARKER.sub(sub, text)))
     out = _PODIUM.sub("podiepladser", out)
+    for pattern, repl in _PHRASES:
+        out = pattern.sub(repl, out)
 
     def danish(m):
         word = _DANISH_FOR[m.group(1).lower()]
