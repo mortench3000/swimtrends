@@ -8,15 +8,16 @@ filters in the URL (`?discipline=IM&gender=M`, see
 inbound `utm_*` tags.
 
 ## Change
-- The redirect's `Location` appends the original query string, rebuilt from
-  `request.querystring` (CloudFront Functions object form:
-  `{ name: { value, multiValue?: [{ value }] } }`).
-  - Parameter order kept; every value of a repeated parameter written
-    (`multiValue` when present, else `value`).
-  - Each name and value is decoded then re-encoded (`encodeURIComponent`), so
-    the result is correct whether CloudFront hands the values over encoded or
-    not; a malformed `%` sequence passes through unchanged instead of throwing.
-  - No query → no `?` (today's behaviour).
+- The redirect's `Location` appends the original query **verbatim**, from
+  `request.rawQueryString()` (JS runtime 2.0, which this function already uses):
+  the query exactly as the visitor sent it, without the leading `?`.
+  - Copied as-is: no decoding or re-encoding, so `+`, `%20` and a stray `%` are
+    never reinterpreted, and nothing new (CR/LF, `&`, `#`) can be introduced.
+  - `undefined` (no `?`) or `""` (a bare `?`) → no `?` in the Location.
+  - Considered first and dropped after review: rebuilding from the parsed
+    `request.querystring` object with decode-then-encode. It turned `+` into
+    `%2B` and needed an unsafe fallback for malformed escapes, and its result
+    depended on whether CloudFront decodes values (undocumented).
 - Apex requests are unchanged (only the `/index.html` rewrite; the query is not
   touched).
 - ES5 only (CloudFront Functions runtime).
@@ -30,9 +31,11 @@ inbound `utm_*` tags.
   uses it). `SwimtrendsCertStack` untouched.
 
 ## Verification
-- Unit: www + filters keeps `?discipline=IM&gender=M`; repeated parameter keeps
-  both values; encoded value stays correctly encoded; no query → no `?`; apex
-  with a query is only rewritten.
+- Unit (a stand-in `rawQueryString()` in the node harness): www + filters keeps
+  `?discipline=IM&gender=M`; repeated parameter, `+`, `%20` and a stray `%` are
+  copied verbatim; bare `?` and no query → no `?`; apex with a query is only
+  rewritten.
 - `cdk diff` shows only the function code changing.
 - Live: `curl -sI 'https://www.swimtrends.dk/DM-L/10334?discipline=IM&gender=M'`
-  → 301 to `https://swimtrends.dk/DM-L/10334?discipline=IM&gender=M`.
+  → 301 to `https://swimtrends.dk/DM-L/10334?discipline=IM&gender=M`; also a
+  query with `+` and `%20`, copied unchanged.

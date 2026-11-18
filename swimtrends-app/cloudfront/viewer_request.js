@@ -19,43 +19,20 @@
 // ES5 only: the CloudFront Functions runtime is not a full modern JS engine.
 var APEX = 'swimtrends.dk';
 
-// Decode-then-encode, so the result is encoded exactly once whether CloudFront
-// handed the value over encoded or not. A malformed escape ("100%") makes
-// decodeURIComponent throw; pass such a value through as-is.
-function enc(s) {
-  try {
-    return encodeURIComponent(decodeURIComponent(s));
-  } catch (e) {
-    return s;
-  }
-}
-
-// request.querystring is an object: { name: { value, multiValue?: [{ value }] } }.
-// A repeated parameter arrives once, with all of its values in multiValue.
-function queryString(qs) {
-  var parts = [];
-  for (var name in qs) {
-    var values = qs[name].multiValue || [qs[name]];
-    for (var i = 0; i < values.length; i++) {
-      parts.push(enc(name) + '=' + enc(values[i].value));
-    }
-  }
-  return parts.length ? '?' + parts.join('&') : '';
-}
-
 function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value;
 
   // Keep the query: meet pages carry their filters in it (?discipline=&gender=),
-  // and inbound utm_* tags should survive too.
+  // and inbound utm_* tags should survive too. rawQueryString() (runtime 2.0)
+  // is the query exactly as sent, so it is copied verbatim: no decoding, no
+  // re-encoding, nothing reinterpreted ('+', '%20', a stray '%').
   if (host && host !== APEX) {
+    var qs = request.rawQueryString();
     return {
       statusCode: 301,
       statusDescription: 'Moved Permanently',
-      headers: {
-        location: { value: 'https://' + APEX + request.uri + queryString(request.querystring || {}) },
-      },
+      headers: { location: { value: 'https://' + APEX + request.uri + (qs ? '?' + qs : '') } },
     };
   }
 

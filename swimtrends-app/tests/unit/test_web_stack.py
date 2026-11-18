@@ -66,13 +66,17 @@ def test_viewer_function_is_associated_with_the_default_behavior():
 FUNC_JS = pathlib.Path(__file__).resolve().parents[2] / "cloudfront" / "viewer_request.js"
 
 
-def _call(uri: str, host: str = "swimtrends.dk", querystring: dict | None = None) -> dict:
-    """Run the real function body and return its result (a request or a response)."""
+def _call(uri: str, host: str = "swimtrends.dk", raw_query: str | None = None) -> dict:
+    """Run the real function body and return its result (a request or a response).
+
+    raw_query stands in for CloudFront's request.rawQueryString() (JS runtime 2.0):
+    the query exactly as sent, without the leading '?'; None = no '?' at all."""
     event = {"request": {"uri": uri, "headers": {"host": {"value": host}}}}
-    if querystring is not None:
-        event["request"]["querystring"] = querystring
     script = FUNC_JS.read_text() + (
-        f"\nprocess.stdout.write(JSON.stringify(handler({json.dumps(event)})))")
+        f"\nvar event = {json.dumps(event)};"
+        f"\nevent.request.rawQueryString = function () {{ return {json.dumps(raw_query)} ?? undefined; }};"
+        "\nvar out = handler(event); delete out.rawQueryString;"
+        "\nprocess.stdout.write(JSON.stringify(out))")
     out = subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True)
     return json.loads(out.stdout)
 
@@ -113,33 +117,28 @@ def test_www_redirects_to_the_apex(uri):
 
 
 # The redirect must keep the query: meet pages carry their filters in it
-# (?discipline=&gender=), and shared www links would otherwise lose them.
+# (?discipline=&gender=), and shared www links would otherwise lose them. It is
+# copied verbatim, so encoding ('+', '%20', a stray '%') is never reinterpreted.
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-@pytest.mark.parametrize("querystring,expected", [
-    ({"discipline": {"value": "IM"}, "gender": {"value": "M"}}, "?discipline=IM&gender=M"),
-    # A repeated parameter arrives once, with every value in multiValue.
-    ({"a": {"value": "1", "multiValue": [{"value": "1"}, {"value": "2"}]}}, "?a=1&a=2"),
-    # Encoded or not on the way in, the Location is encoded exactly once.
-    ({"utm_campaign": {"value": "jul%20tilbud"}}, "?utm_campaign=jul%20tilbud"),
-    ({"utm_campaign": {"value": "jul tilbud"}}, "?utm_campaign=jul%20tilbud"),
-    ({"q": {"value": "æøå"}}, "?q=%C3%A6%C3%B8%C3%A5"),
-    # A malformed escape passes through rather than throwing.
-    ({"x": {"value": "100%"}}, "?x=100%"),
-    ({"flag": {"value": ""}}, "?flag="),
-    ({}, ""),
+@pytest.mark.parametrize("raw_query,expected", [
+    ("discipline=IM&gender=M", "?discipline=IM&gender=M"),
+    ("a=1&a=2", "?a=1&a=2"),
+    ("utm_campaign=jul+tilbud&utm_source=x%20y", "?utm_campaign=jul+tilbud&utm_source=x%20y"),
+    ("x=100%", "?x=100%"),
+    ("", ""),      # a bare '?' with nothing after it
+    (None, ""),    # no '?' at all
 ])
-def test_www_redirect_keeps_the_query(querystring, expected):
-    res = _call("/DM-L/10334", host="www.swimtrends.dk", querystring=querystring)
+def test_www_redirect_keeps_the_query(raw_query, expected):
+    res = _call("/DM-L/10334", host="www.swimtrends.dk", raw_query=raw_query)
     assert res["statusCode"] == 301
     assert res["headers"]["location"]["value"] == f"https://swimtrends.dk/DM-L/10334{expected}"
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_apex_request_with_a_query_is_only_rewritten():
-    qs = {"discipline": {"value": "IM"}}
-    res = _call("/DM-L/10334", querystring=qs)
+    res = _call("/DM-L/10334", raw_query="discipline=IM")
     assert res["uri"] == "/DM-L/10334/index.html"
-    assert res["querystring"] == qs
+    assert "statusCode" not in res
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
