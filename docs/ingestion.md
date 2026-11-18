@@ -100,3 +100,50 @@ aws s3 cp db/5879_races.jsonl     $B/races.jsonl
 aws s3 cp db/5879_results.jsonl   $B/results.jsonl    # last -> triggers curate
 ```
 Be polite to svømmetider.dk: one meet at a time, sequential.
+
+## New World Aquatics base times (twice a year)
+`points` are scored against `reference/point_base_times.jsonl`, keyed by Danish
+season + course. WA publishes two editions a year:
+
+| WA edition | Published | Valid | Danish season |
+| --- | --- | --- | --- |
+| SCM *Y* (25 m) | ~September | 1 Sep *Y* – 31 Aug *Y+1* | *Y+1* |
+| LCM *Y* (50 m) | ~January | 1 Jan *Y* – 31 Dec *Y* | *Y* |
+
+Until the new edition is in the reference file, every meet of that season and
+course is curated with `points = NULL` (`points_fixed` is unaffected), and the
+curate email arrives as **`Swimtrends curate WARNING: no base times`** instead
+of SUCCEEDED.
+
+Each WA document normally holds both courses; one half repeats the edition
+already in the generator. Add only the new half, after checking the other is
+unchanged.
+
+1. **Source.** Save the PDF to `st-scrape/wa-points/pdf/` and its markdown
+   conversion to `st-scrape/wa-points/`
+   (`Points-Base-times-SCM-and-LCM-<YYYY>_<MM>.<YYYY>.md`).
+2. **Generator.** Add a block to `BLOCKS` in `st-scrape/gen_base_times.py`:
+   `wa_label`, `course`, `season` (table above), `validity_start/end`, and the
+   individual / relay / mixed rows. Copy the previous edition of the same
+   course and change only the times that moved.
+3. **Regenerate + verify.** `cd st-scrape && .venv/bin/python gen_base_times.py`
+   (fails on any time-string/seconds mismatch). Diff against the live copy:
+   ```bash
+   aws s3 cp s3://swimtrends-meet-data/reference/point_base_times.jsonl - | diff - db/point_base_times.jsonl
+   ```
+   Expect only added rows for the new season: **48 for SCM, 42 for LCM**,
+   none removed. Check them against the markdown, not by eye.
+4. **PR.** `pytest -q`, branch, PR, green CI, squash-merge.
+5. **Upload** (the bucket is versioned):
+   ```bash
+   aws s3 cp db/point_base_times.jsonl s3://swimtrends-meet-data/reference/point_base_times.jsonl
+   ```
+   Every curate from here on scores the new season.
+6. **Re-curate** meets curated before the upload:
+   ```bash
+   swimtrends query --sql "select meet_id, count(points) pts from cur_obt
+                           where season=<S> and course='<C>' group by 1"
+   swimtrends curate <meet_id>        # each meet with pts = 0
+   ```
+7. **Publish.** `make web-refresh` (~50 min). AI reports for those meets are
+   regenerated in the same run, since their digest changed.
