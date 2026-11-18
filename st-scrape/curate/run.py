@@ -49,8 +49,16 @@ def run_curate_task(*, meet_id, read_text, get_overrides, write_bytes, notify):
             write_bytes(key, parquet.write_parquet_bytes(table_name, rows))
             counts[table_name] = len(rows)
 
-        _safe_notify(notify, "Swimtrends curate SUCCEEDED",
-                     f"Meet {meet_id} ({meet.get('meet','')}) curated: {counts}")
+        summary = f"Meet {meet_id} ({meet.get('meet','')}) curated: {counts}"
+        if any(k[:2] == (season, course) for k in base_times):
+            _safe_notify(notify, "Swimtrends curate SUCCEEDED", summary)
+        else:
+            # Points would all be NULL; a SUCCEEDED subject hid this for DMJ-K 12489.
+            _safe_notify(notify, "Swimtrends curate WARNING: no base times",
+                         f"{summary}\n\nNo World Aquatics base times for season "
+                         f"{season} {course}: every result has points = NULL. Add the "
+                         f"new WA edition, then re-curate (docs/ingestion.md, "
+                         f"'New World Aquatics base times').")
         return counts
     except Exception as e:
         _safe_notify(notify, "Swimtrends curate FAILED", f"Meet {meet_id}: {e}")
