@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { filterRaces, disciplineOptions, genderOptions } from '../src/lib/raceFilter.js'
+import { filterRaces, disciplineOptions, genderOptions, filtersFromSearch, filtersToSearch } from '../src/lib/raceFilter.js'
 
 const races = [
   { race_key: 'M-100-Fri',   stroke: 'Fri',   gender: 'M', is_relay: false },
@@ -43,4 +43,20 @@ test('disciplineOptions omits Stafet when no relay present', () => {
 
 test('genderOptions lists present genders in M,F,X order', () => {
   expect(genderOptions(races)).toEqual(['all', 'M', 'F', 'X'])
+})
+
+test('filtersFromSearch reads known values', () => {
+  expect(filtersFromSearch('?discipline=IM&gender=M')).toEqual({ discipline: 'IM', gender: 'M' })
+})
+test('filtersFromSearch maps missing, unknown and wrong-case values to all', () => {
+  expect(filtersFromSearch('')).toEqual({ discipline: 'all', gender: 'all' })
+  expect(filtersFromSearch('?discipline=foo&gender=m&utm_source=x'))
+    .toEqual({ discipline: 'all', gender: 'all' })
+})
+test('filtersToSearch omits all and round-trips', () => {
+  expect(filtersToSearch({ discipline: 'all', gender: 'all' })).toBe('')
+  expect(filtersToSearch({ discipline: 'Stafet', gender: 'all' })).toBe('?discipline=Stafet')
+  const s = filtersToSearch({ discipline: 'IM', gender: 'F' })
+  expect(s).toBe('?discipline=IM&gender=F')
+  expect(filtersFromSearch(s)).toEqual({ discipline: 'IM', gender: 'F' })
 })

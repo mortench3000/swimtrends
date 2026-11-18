@@ -1,5 +1,5 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/svelte'
-import { expect, test, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/svelte'
+import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import * as dc from '../src/lib/dataClient.js'
 import Meet from '../src/routes/Meet.svelte'
 import Race from '../src/routes/Race.svelte'
@@ -10,6 +10,10 @@ import raceJson from './fixtures/race.json'
 import evaluationJson from './fixtures/evaluation.json'
 
 beforeEach(() => { dc._resetCache() })
+afterEach(() => {
+  vi.restoreAllMocks()
+  history.replaceState(null, '', '/')
+})
 
 const juniorMeet = {
   category: 'DMJ-L', meet_id: 'C2026', meet_name: 'Combined Champs 2026',
@@ -217,4 +221,100 @@ test('non-junior race still shows the A-finale-grænse tile', async () => {
   await waitFor(() => expect(screen.getByText(raceJson.podium[0].name)).toBeInTheDocument())
   expect(screen.getByText('A-finale-grænse')).toBeInTheDocument()
   expect(screen.getByText(/A-finale-grænse pr\. sæson/)).toBeInTheDocument()   // cutline chart shown
+})
+
+function mockMeet(races) {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(races)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
+}
+const alle = (group) => within(screen.getByRole('group', { name: group })).getByRole('button', { name: 'Alle' })
+
+test('Meet takes its initial filters from the URL', async () => {
+  history.replaceState({}, '', '/DM-L/M2026?discipline=Bryst&gender=F')
+  mockMeet(filterRacesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  const bryst = await screen.findByRole('button', { name: 'Bryst' })
+  expect(bryst).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('button', { name: 'Damer' })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('clicking chips rewrites the URL without adding history entries', async () => {
+  history.replaceState({}, '', '/DM-L/M2026')
+  mockMeet(racesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByRole('button', { name: 'Fri' })
+  const len = history.length
+  await fireEvent.click(screen.getByRole('button', { name: 'Fri' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Herrer' }))
+  expect(location.search).toBe('?discipline=Fri&gender=M')
+  expect(history.length).toBe(len)
+  await fireEvent.click(alle('Disciplin'))
+  await fireEvent.click(alle('Køn'))
+  expect(location.search).toBe('')
+  expect(location.pathname).toBe('/DM-L/M2026')
+})
+
+test('a filter the meet does not offer falls back to Alle', async () => {
+  history.replaceState({}, '', '/DM-L/M2026?discipline=Stafet')
+  mockMeet(racesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByRole('button', { name: 'Fri' })
+  expect(alle('Disciplin')).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getAllByRole('link').filter(a => a.classList.contains('race-row'))).toHaveLength(2)
+  expect(location.search).toBe('')
+})
+
+test('a late fallback does not rewrite the URL of a page the user already left', async () => {
+  history.replaceState({}, '', '/DM-L/M2026?discipline=Stafet&gender=M')
+  let resolve
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockReturnValue(new Promise(r => { resolve = r }))
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  history.replaceState(null, '', '/DM-L')
+  resolve(racesJson)
+  await screen.findByRole('button', { name: 'Fri' })
+  expect(location.search).toBe('')
+  expect(location.pathname).toBe('/DM-L')
+})
+
+function mountRace() {
+  vi.spyOn(dc, 'getRace').mockResolvedValue(raceJson)
+  render(Race, { params: { cat: 'DM-L', meetId: 'M2026', raceKey: 'M-100-Fri-LCM' } })
+  return screen.getByRole('link', { name: 'Tilbage' })
+}
+
+test('Tilbage links to the meet', () => {
+  expect(mountRace()).toHaveAttribute('href', '/DM-L/M2026')
+})
+
+test('Tilbage goes back after in-app navigation', async () => {
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+  history.replaceState({ app: true }, '', '/DM-L/M2026/x')
+  const link = mountRace()
+  expect(await fireEvent.click(link)).toBe(false)
+  expect(back).toHaveBeenCalledTimes(1)
+})
+
+test('Tilbage follows its link on a direct landing', () => {
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+  history.replaceState(null, '', '/DM-L/M2026/x')
+  const link = mountRace()
+  fireEvent.click(link)
+  expect(back).not.toHaveBeenCalled()
+  expect(location.pathname).toBe('/DM-L/M2026')
+})
+
+test('Tilbage leaves modified clicks to the browser', async () => {
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+  history.replaceState({ app: true }, '', '/DM-L/M2026/x')
+  const link = mountRace()
+  let prevented
+  const probe = (e) => { prevented = e.defaultPrevented; e.preventDefault() }
+  window.addEventListener('click', probe)
+  await fireEvent.click(link, { ctrlKey: true })
+  window.removeEventListener('click', probe)
+  expect(prevented).toBe(false)
+  expect(back).not.toHaveBeenCalled()
 })

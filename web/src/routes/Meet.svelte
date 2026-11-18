@@ -3,7 +3,7 @@
   import { getMeet, getRaces, getEvaluation } from '../lib/dataClient.js'
   import { href } from '../router.js'
   import { formatInt, formatPoints, formatTimeStr, formatDelta, formatShare } from '../lib/format.js'
-  import { filterRaces, disciplineOptions, genderOptions } from '../lib/raceFilter.js'
+  import { filterRaces, disciplineOptions, genderOptions, filtersFromSearch, filtersToSearch } from '../lib/raceFilter.js'
   import { setMeta } from '../lib/meta.js'
   import { meetMeta } from '../lib/seo.js'
   import Breadcrumbs from '../components/Breadcrumbs.svelte'
@@ -20,8 +20,17 @@
   let loading = $state(true)
   let err = $state(null)
 
-  let discipline = $state('all')
-  let gender = $state('all')
+  const initial = filtersFromSearch(location.search)
+  let discipline = $state(initial.discipline)
+  let gender = $state(initial.gender)
+
+  // replaceState (not push): chips must not add history entries; keep the
+  // router's marker in history.state so a later "back" link still works.
+  function setFilters(next) {
+    discipline = next.discipline
+    gender = next.gender
+    history.replaceState(history.state, '', location.pathname + filtersToSearch(next))
+  }
 
   const DISCIPLINE_LABEL = { all: 'Alle', Stafet: 'Stafet' } // strokes fall back to their own value
   const GENDER_LABEL = { all: 'Alle', M: 'Herrer', F: 'Damer', X: 'Mix' }
@@ -43,6 +52,11 @@
       ])
       meet = m
       races = r.races
+      const f = { discipline, gender }
+      if (!disciplineOptions(races).includes(f.discipline)) f.discipline = 'all'
+      if (!genderOptions(races).includes(f.gender)) f.gender = 'all'
+      if ((f.discipline !== discipline || f.gender !== gender) &&
+          location.pathname === href('meet', { cat: params.cat, meetId: params.meetId })) setFilters(f)
       evaluation = e
       setMeta(meetMeta(meet, evaluation))
     } catch (e) {
@@ -171,7 +185,7 @@
             type="button"
             class="chip"
             aria-pressed={discipline === d}
-            onclick={() => (discipline = d)}
+            onclick={() => setFilters({ discipline: d, gender })}
           >{DISCIPLINE_LABEL[d] ?? d}</button>
         {/each}
       </div>
@@ -181,7 +195,7 @@
             type="button"
             class="chip"
             aria-pressed={gender === g}
-            onclick={() => (gender = g)}
+            onclick={() => setFilters({ discipline, gender: g })}
           >{GENDER_LABEL[g] ?? g}</button>
         {/each}
       </div>

@@ -23,9 +23,9 @@ function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value;
 
-  // ponytail: the query string is dropped. No Swimtrends URL carries parameters,
-  // so only inbound utm_* tags are affected. Rebuild it from request.querystring
-  // if that ever matters.
+  // ponytail: the query string is dropped. Known gap: meet pages now carry
+  // ?discipline=&gender= filters, so a shared www link loses its filters (and
+  // inbound utm_* tags). Rebuild it from request.querystring in a follow-up.
   if (host && host !== APEX) {
     return {
       statusCode: 301,

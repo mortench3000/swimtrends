@@ -55,12 +55,22 @@
       : [],
   )
 
+  function back(e) {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+    if (history.state?.app) {
+      e.preventDefault()
+      history.back()
+    }
+  }
+
   const crumbs = $derived([
     { label: params.cat, href: href('home', { cat: params.cat }) },
     { label: 'Stævne', href: href('meet', { cat: params.cat, meetId: params.meetId }) },
     { label: race ? race.label : 'Løb' },
   ])
 </script>
+
+<a class="back" href={href('meet', { cat: params.cat, meetId: params.meetId })} onclick={back}><span aria-hidden="true">←</span> Tilbage</a>
 
 {#if loading}
   <Breadcrumbs
@@ -131,6 +141,19 @@
 {/if}
 
 <style>
+  .back {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--muted);
+    text-decoration: none;
+    margin-bottom: var(--space-3);
+  }
+
+  .back:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+
   .state {
     font-size: 0.95rem;
     padding: var(--space-4) 0;

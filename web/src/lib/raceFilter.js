@@ -27,3 +27,23 @@ export function genderOptions(races) {
   const present = new Set(races.map((r) => r.gender))
   return ['all', ...GENDER_ORDER.filter((g) => present.has(g))]
 }
+
+// URL query-string form of the filters (?discipline=IM&gender=M). Unknown or
+// wrong-case values read as 'all'; 'all' is omitted when writing.
+export function filtersFromSearch(search) {
+  const p = new URLSearchParams(search)
+  const d = p.get('discipline')
+  const g = p.get('gender')
+  return {
+    discipline: [...STROKE_ORDER, 'Stafet'].includes(d) ? d : 'all',
+    gender: GENDER_ORDER.includes(g) ? g : 'all',
+  }
+}
+
+export function filtersToSearch({ discipline = 'all', gender = 'all' } = {}) {
+  const p = new URLSearchParams()
+  if (discipline !== 'all') p.set('discipline', discipline)
+  if (gender !== 'all') p.set('gender', gender)
+  const s = p.toString()
+  return s ? `?${s}` : ''
+}

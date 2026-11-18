@@ -82,3 +82,25 @@ test('leaves external, new-tab, download and modified clicks to the browser', ()
   expect(clickLink({ href: '/DM-L/1' }, { button: 1 }).defaultPrevented).toBe(false)
   expect(location.pathname).toBe('/')
 })
+
+test('parsePath ignores a query string', () => {
+  expect(parsePath('/DM-L/M2026?discipline=IM&gender=M'))
+    .toEqual({ name: 'meet', params: { cat: 'DM-L', meetId: 'M2026' } })
+})
+test('navigate keeps the query in the URL and routes on the path', () => {
+  navigate('/DM-K/9999?gender=F')
+  expect(location.pathname).toBe('/DM-K/9999')
+  expect(location.search).toBe('?gender=F')
+  expect(get(route)).toEqual({ name: 'meet', params: { cat: 'DM-K', meetId: '9999' } })
+  navigate('/')
+})
+test('navigate marks its history entries as in-app', () => {
+  navigate('/DM-K/9999')
+  expect(history.state).toEqual({ app: true })
+  navigate('/')
+})
+test('intercepted links keep their query', () => {
+  clickLink({ href: '/DM-L/12486?discipline=Fly' })
+  expect(location.search).toBe('?discipline=Fly')
+  navigate('/')
+})
