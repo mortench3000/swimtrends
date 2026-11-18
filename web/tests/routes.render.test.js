@@ -261,3 +261,40 @@ test('a filter the meet does not offer falls back to Alle', async () => {
   expect(screen.getAllByRole('listitem').length).toBeGreaterThanOrEqual(racesJson.races.length)
   expect(location.search).toBe('')
 })
+
+function mountRace() {
+  vi.spyOn(dc, 'getRace').mockResolvedValue(raceJson)
+  render(Race, { params: { cat: 'DM-L', meetId: 'M2026', raceKey: 'M-100-Fri-LCM' } })
+  return screen.getByRole('link', { name: '← Tilbage' })
+}
+
+test('Tilbage links to the meet', () => {
+  expect(mountRace()).toHaveAttribute('href', '/DM-L/M2026')
+})
+
+test('Tilbage goes back after in-app navigation', async () => {
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+  history.replaceState({ app: true }, '', '/DM-L/M2026/x')
+  const link = mountRace()
+  expect(await fireEvent.click(link)).toBe(false)
+  expect(back).toHaveBeenCalledTimes(1)
+  back.mockRestore()
+})
+
+test('Tilbage follows its link on a direct landing', () => {
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+  history.replaceState(null, '', '/DM-L/M2026/x')
+  const link = mountRace()
+  fireEvent.click(link)
+  expect(back).not.toHaveBeenCalled()
+  back.mockRestore()
+})
+
+test('Tilbage leaves modified clicks to the browser', async () => {
+  const back = vi.spyOn(history, 'back').mockImplementation(() => {})
+  history.replaceState({ app: true }, '', '/DM-L/M2026/x')
+  const link = mountRace()
+  expect(await fireEvent.click(link, { ctrlKey: true })).toBe(true)
+  expect(back).not.toHaveBeenCalled()
+  back.mockRestore()
+})
