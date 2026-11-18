@@ -22,10 +22,22 @@ WEB_DIST = $(shell aws cloudformation describe-stacks --stack-name SwimtrendsWeb
 	--query "Stacks[0].Outputs[?OutputKey=='DistributionId'].OutputValue" --output text \
 	$(AWS_PROFILE_FLAG) --region eu-west-1)
 
-# Build the SPA and push it (keeps /data/ intact via --exclude)
+# Browser caching. Without a Cache-Control header browsers guess (~10% of the
+# object's age), so a months-old meets.json could be reused for days after a
+# refresh. no-cache = always revalidate (a cheap 304 when unchanged). Vite's
+# assets/ carry a content hash in the name, so they can be cached for good.
+# sync only uploads changed files: after changing these, rewrite the existing
+# objects' metadata once (see the PR that added this).
+NO_CACHE = --cache-control "no-cache"
+IMMUTABLE = --cache-control "public, max-age=31536000, immutable"
+
+# Build the SPA and push it (keeps /data/ intact via --exclude). assets/ goes
+# first: the new HTML references the new hashed names.
 web-deploy:
 	cd web && npm ci && npm run build
-	aws s3 sync web/dist s3://$(WEB_BUCKET)/ --delete --exclude "data/*" $(AWS_PROFILE_FLAG)
+	aws s3 sync web/dist/assets s3://$(WEB_BUCKET)/assets/ --delete $(IMMUTABLE) $(AWS_PROFILE_FLAG)
+	aws s3 sync web/dist s3://$(WEB_BUCKET)/ --delete --exclude "data/*" --exclude "assets/*" \
+		$(NO_CACHE) $(AWS_PROFILE_FLAG)
 	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) --paths "/*" $(AWS_PROFILE_FLAG)
 
 # Evaluation config. Read live from the deployed stack rather than a shell export
@@ -63,7 +75,7 @@ eval-preflight:
 web-refresh: eval-preflight
 	cd st-scrape && $(ST_PYTHON) -m webbuild --out ../web/public/data
 	$(MAKE) web-eval
-	aws s3 sync web/public/data s3://$(WEB_BUCKET)/data/ --delete --profile swimtrends
+	aws s3 sync web/public/data s3://$(WEB_BUCKET)/data/ --delete $(NO_CACHE) --profile swimtrends
 	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) --paths "/data/*" --profile swimtrends
 
 # Fill the evaluation cache and emit evaluation.json (seconds on a cache hit).
@@ -89,7 +101,7 @@ web-eval: eval-preflight
 #     byte. Use web-eval-verify, which compares md5 against the ETag.
 web-eval-deploy: web-eval
 	aws s3 sync web/public/data s3://$(WEB_BUCKET)/data/ \
-		--exclude "*" --include "*/evaluation.json" --profile swimtrends
+		--exclude "*" --include "*/evaluation.json" $(NO_CACHE) --profile swimtrends
 	aws cloudfront create-invalidation --distribution-id $(WEB_DIST) \
 		--paths "/data/*" --profile swimtrends
 
