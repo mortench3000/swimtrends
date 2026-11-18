@@ -147,5 +147,8 @@ unchanged.
    ```
    When *correcting* an existing edition, drop `--unscored`: those meets are
    scored, just wrongly.
-7. **Publish.** `make web-refresh` (~50 min). AI reports for those meets are
-   regenerated in the same run, since their digest changed.
+7. **Publish.** `make web-refresh` (~50 min), after all re-curates have
+   finished. AI reports regenerate in the same run for every meet of that
+   course in seasons *S*…*S+5* (each digest spans six seasons), not only the
+   re-curated ones. A refused report is removed from the site until a later
+   run passes; `make web-eval-deploy` re-rolls in seconds.

@@ -66,6 +66,17 @@ confirm with
 `ingestion.cli query --sql "select meet_id, count(points) from cur_obt where season=<S> and course='<C>' group by 1"`.
 
 Then `make web-refresh` from the repo root (~50 min, silent until the end;
-run it in the background). The AI reports for re-scored meets regenerate in
-the same run. Confirm on `https://swimtrends.dk/data/<CAT>/<meet>/meet.json`
+run it in the background). Finish every re-curate first: webbuild and the
+AI-report step read the curated zone ~50 min apart, so a curate landing in
+between publishes pages and reports built from different data.
+
+**Report regeneration fans out.** A meet's AI report digest covers its own
+season plus the five prior seasons of its category, so re-scoring season *S*
+regenerates the report of every meet of that course in seasons *S*…*S+5*, not
+just the re-curated ones (correcting SCM 2023 regenerated 9 meets across DM-K
+and DMJ-K). That is correct, since the reports quote those trend numbers, but
+tell the user before running it: each regeneration is a Bedrock call, and a
+grounding refusal **removes that meet's published report** until a later run
+passes (refusals are stochastic; re-run `make web-eval-deploy` to re-roll).
+Adding a brand-new season only affects that season's meets. Confirm on `https://swimtrends.dk/data/<CAT>/<meet>/meet.json`
 (`elite_median_points` is non-null).
