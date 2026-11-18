@@ -1,5 +1,5 @@
-import { render, screen, waitFor, fireEvent } from '@testing-library/svelte'
-import { expect, test, vi, beforeEach } from 'vitest'
+import { render, screen, waitFor, fireEvent, within } from '@testing-library/svelte'
+import { expect, test, vi, beforeEach, afterEach } from 'vitest'
 import * as dc from '../src/lib/dataClient.js'
 import Meet from '../src/routes/Meet.svelte'
 import Race from '../src/routes/Race.svelte'
@@ -10,6 +10,7 @@ import raceJson from './fixtures/race.json'
 import evaluationJson from './fixtures/evaluation.json'
 
 beforeEach(() => { dc._resetCache() })
+afterEach(() => history.replaceState(null, '', '/'))
 
 const juniorMeet = {
   category: 'DMJ-L', meet_id: 'C2026', meet_name: 'Combined Champs 2026',
@@ -217,4 +218,46 @@ test('non-junior race still shows the A-finale-grænse tile', async () => {
   await waitFor(() => expect(screen.getByText(raceJson.podium[0].name)).toBeInTheDocument())
   expect(screen.getByText('A-finale-grænse')).toBeInTheDocument()
   expect(screen.getByText(/A-finale-grænse pr\. sæson/)).toBeInTheDocument()   // cutline chart shown
+})
+
+function mockMeet(races) {
+  vi.spyOn(dc, 'getMeet').mockResolvedValue(meetJson)
+  vi.spyOn(dc, 'getRaces').mockResolvedValue(races)
+  vi.spyOn(dc, 'getEvaluation').mockResolvedValue(null)
+}
+const alle = (group) => within(screen.getByRole('group', { name: group })).getByRole('button', { name: 'Alle' })
+
+test('Meet takes its initial filters from the URL', async () => {
+  history.replaceState({}, '', '/DM-L/M2026?discipline=Bryst&gender=F')
+  mockMeet(filterRacesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  const bryst = await screen.findByRole('button', { name: 'Bryst' })
+  expect(bryst).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getByRole('button', { name: 'Damer' })).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('clicking chips rewrites the URL without adding history entries', async () => {
+  history.replaceState({}, '', '/DM-L/M2026')
+  mockMeet(racesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByRole('button', { name: 'Fri' })
+  const len = history.length
+  await fireEvent.click(screen.getByRole('button', { name: 'Fri' }))
+  await fireEvent.click(screen.getByRole('button', { name: 'Herrer' }))
+  expect(location.search).toBe('?discipline=Fri&gender=M')
+  expect(history.length).toBe(len)
+  await fireEvent.click(alle('Disciplin'))
+  await fireEvent.click(alle('Køn'))
+  expect(location.search).toBe('')
+  expect(location.pathname).toBe('/DM-L/M2026')
+})
+
+test('a filter the meet does not offer falls back to Alle', async () => {
+  history.replaceState({}, '', '/DM-L/M2026?discipline=Stafet')
+  mockMeet(racesJson)
+  render(Meet, { params: { cat: 'DM-L', meetId: 'M2026' } })
+  await screen.findByRole('button', { name: 'Fri' })
+  expect(alle('Disciplin')).toHaveAttribute('aria-pressed', 'true')
+  expect(screen.getAllByRole('listitem').length).toBeGreaterThanOrEqual(racesJson.races.length)
+  expect(location.search).toBe('')
 })
