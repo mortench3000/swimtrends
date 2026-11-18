@@ -102,6 +102,23 @@ def _default_query_connect():
     return loader.connect()
 
 
+def curate_event(meet_ids):
+    """The S3 ObjectCreated shape the curate trigger Lambda understands."""
+    return {"Records": [{"s3": {"object": {"key": f"raw/meet={m}/results.jsonl"}}}
+                        for m in meet_ids]}
+
+
+def _raw_meet_ids():
+    """Every meet in the raw zone that has a results.jsonl (what --all curates)."""
+    import boto3
+    bucket = os.environ.get("RAW_BUCKET", "swimtrends-meet-data")
+    pages = boto3.client("s3").get_paginator("list_objects_v2").paginate(
+        Bucket=bucket, Prefix="raw/")
+    return sorted(o["Key"].split("/")[1].removeprefix("meet=")
+                  for p in pages for o in p.get("Contents", [])
+                  if o["Key"].endswith("/results.jsonl"))
+
+
 def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
     """Execute one CLI command. registry/invoke/curate/overrides injected."""
     args = build_parser().parse_args(argv)
@@ -152,8 +169,12 @@ def run(argv, *, registry, invoke, curate=None, overrides=None, connect=None):
         if not args.all and not args.meet_id:
             raise SystemExit("curate needs a meet_id or --all.")
         payload = {"all": True} if args.all else {"meet_ids": [args.meet_id]}
-        curate(payload)
-        print(f"Curate invoked with payload: {json.dumps(payload)}")
+        result = curate(payload) or {}
+        launched = result.get("launched", [])
+        print(f"Curate launched: {', '.join(launched) or '(none)'}")
+        missing = set(payload.get("meet_ids", [])) - set(launched)
+        if missing:
+            raise SystemExit(f"Curate did not launch: {', '.join(sorted(missing))}")
         return
 
     if args.command == "class":
@@ -295,10 +316,19 @@ def main():
     def curate(payload):
         if curator_fn is None:
             raise SystemExit("CURATOR_FUNCTION not set.")
-        resp = lambda_client.invoke(
-            FunctionName=curator_fn, InvocationType="Event",
-            Payload=json.dumps(payload).encode("utf-8"))
-        return resp["StatusCode"]
+        meet_ids = payload.get("meet_ids") or _raw_meet_ids()
+        launched = []
+        # ponytail: batches of 10 keep each RunTask loop well inside the
+        # trigger Lambda's 60 s timeout (~1 s per launch).
+        for i in range(0, len(meet_ids), 10):
+            resp = lambda_client.invoke(
+                FunctionName=curator_fn, InvocationType="RequestResponse",
+                Payload=json.dumps(curate_event(meet_ids[i:i + 10])).encode("utf-8"))
+            body = resp["Payload"].read().decode("utf-8")
+            if resp.get("FunctionError"):
+                raise SystemExit(f"Curate trigger failed: {body}")
+            launched += json.loads(body).get("launched", [])
+        return {"launched": launched}
 
     run(argv, registry=registry, invoke=invoke,
         curate=curate, overrides=overrides)
