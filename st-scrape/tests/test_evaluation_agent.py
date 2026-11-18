@@ -824,6 +824,9 @@ def test_plain_prose_uses_the_swimming_words_for_events_courses_and_deltas():
     cases = {
         "afviklet over 44 øvelser i kortbane.": "afviklet over 44 discipliner på kortbane.",
         "Øvelserne i langbane lå lavt.": "Disciplinerne på langbane lå lavt.",
+        "tog 5 titler i herreøvelserne,": "tog 5 titler i herredisciplinerne,",
+        "3 titler i damernes distanceøvelser:": "3 titler i damernes distancediscipliner:",
+        "lå Fri-øvelserne på": "lå Fri-disciplinerne på",
         "I kortbane faldt niveauet.": "På kortbane faldt niveauet.",
         "median med en delta på -23 point,": "median med en forskel på -23 point,",
         "bevægelse med et delta på 7 point": "bevægelse med en forskel på 7 point",

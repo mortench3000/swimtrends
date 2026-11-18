@@ -252,10 +252,7 @@ _DANISH_FOR = {
     # were plural ("på tværs af slag", "de enkelte slag"), so plural it is.
     "slag": "stilarter", "slagene": "stilarterne",
     "deltas": "forskelle", "deltaer": "forskelle",
-    # Not English, but the same one-word repair: "øvelser" is gymnastics/school
-    # Danish, "podier" isn't Danish swimming (DMJ-K/12489 had both).
-    "øvelse": "disciplin", "øvelsen": "disciplinen",
-    "øvelser": "discipliner", "øvelserne": "disciplinerne",
+    # Not English, but the same one-word repair: "podier" isn't Danish swimming.
     "podier": "podiepladser",
     # A Danish compound the model drops an s from. Same operation, same map.
     "femårsnit": "femårssnit", "femårsnittet": "femårssnittet",
@@ -273,6 +270,11 @@ _PHRASES = [
     (re.compile(r"\bdelta\b(?!-)"), "forskel"),
     (re.compile(r"\bdelta-værdi(en|er|erne)?\b"),
      lambda m: "forskel" + {None: "", "en": "len", "er": "le", "erne": "lene"}[m[1]]),
+    # "øvelser" is gymnastics/school Danish. No leading \b: compounds too
+    # ("herreøvelserne", "distanceøvelser" were live).
+    # øvelse/-n/-r/-rne -> disciplin/-en/-er/-erne.
+    (re.compile(r"(?:\b(Ø)|ø)velse(n|r|rne)?\b"),
+     lambda m: ("D" if m[1] else "d") + "isciplin" + ("e" + m[2] if m[2] else "")),
     (re.compile(r"\bi\s+(kort|lang)bane\b(?!-)"), r"på \1bane"),
     (re.compile(r"\bI\s+(kort|lang)bane\b(?!-)"), r"På \1bane"),
     (re.compile(r"\b(?!1\b)(\d+)\s+podieplacering\b"), r"\1 podieplaceringer"),
